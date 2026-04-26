@@ -1,65 +1,62 @@
-use axum::{routing::get, Router, Extension, http::StatusCode};
+use axum::Router;
+use data_collector::errors::project_errors::DataCollectorError;
 use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
+async fn main() -> Result<(), DataCollectorError<'static>> {
     // Lets load the .env file and apply it, if it fails, we throw error
     if let Err(e) = dotenv::dotenv() {
-        eprintln!("[Data-Collector error] Failed to load .env {}", e);
-        std::process::exit(1);
+        return Err(DataCollectorError::EnviromentFileError(e));
     }
 
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(e) => {
+            return Err(DataCollectorError::EnviromentVariableError(
+                "DATABASE_URL",
+                e,
+            ));
+        }
+    };
+    let api_port = match std::env::var("API_PORT") {
+        Ok(port) => port,
+        Err(e) => {
+            return Err(DataCollectorError::EnviromentVariableError("API_PORT", e));
+        }
+    };
 
-    let db_url = std::env::var("DATABASE_URL").expect("[Data-Collector error] DATABASE_URL must be set");
-    let api_port = std::env::var("API_PORT").expect("[Data-Collector error] API_PORT must be set");
-    
     // Create a connection pool
-    let pool = PgPoolOptions::new()
+    let pool = match PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
         .await
-        .expect("Failed to connect to Postgres");
+    {
+        Ok(pool) => pool,
+        Err(e) => {
+            return Err(DataCollectorError::PosgresConnectionError(e));
+        }
+    };
 
-    let app = Router::new()
-        .route("/health", get(health_check))
-        .layer(Extension(pool));
+    let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
-    let listener = match tokio::net::TcpListener::bind(formatted_addr).await {
+    let listener = match tokio::net::TcpListener::bind(formatted_addr.clone()).await {
         Ok(listener) => listener,
         Err(e) => {
-            eprintln!("[Data-Collector error] Failed to bind to address: {}", e);
-            std::process::exit(1);
+            return Err(DataCollectorError::TcpBindError(e));
         }
     };
 
-    match axum::serve(listener, app).await {
-        Ok(_) => {
-            println!("[Data Collector] API is now running on port {}", api_port);
-        },
-        Err(e) => {
-            eprintln!("[Data-Collector error] Failed to start server: {}", e);
-            std::process::exit(1);
-        }
+    println!(
+        "[Data Collector] API is now starting to deliver on port {} ({})",
+        api_port, formatted_addr
+    );
+
+    // 2. Then start the server
+    if let Err(e) = axum::serve(listener, app).await {
+        return Err(DataCollectorError::AxumServeError(e));
     }
 
     Ok(())
-}
-
-async fn health_check(Extension(pool): Extension<sqlx::PgPool>) -> axum::Json<serde_json::Value> {
-
-    // lets return a simple json response with the status of the database connection
-    let (code, message) = match sqlx::query("SELECT 1").execute(&pool).await {
-        Ok(_) => (StatusCode::OK, String::from("Database connection is healthy and its working!")),
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, format!("Database connection is unhealthy ({})", e)),
-    };
-
-    let response = serde_json::json!({
-        "status": code.as_u16(),
-        "message": message
-    });
-
-    axum::Json(response)
 }
