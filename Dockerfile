@@ -11,7 +11,7 @@ CMD ["cargo", "watch", "-x", "run"]
 
 # --- Stage 3: Builder (Production prep) ---
 FROM base AS builder
-COPY Cargo.toml Cargo.lock .env ./
+COPY Cargo.toml .env ./
 COPY src ./src
 RUN cargo build --release
 
