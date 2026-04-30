@@ -1,41 +1,14 @@
 use axum::Router;
 use data_collector::errors::project_errors::DataCollectorError;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    // Lets load the .env file and apply it, if it fails, we throw error
-    if let Err(e) = dotenv::dotenv() {
-        return Err(DataCollectorError::EnviromentFileError(e));
-    }
-
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(e) => {
-            return Err(DataCollectorError::EnviromentVariableError(
-                "DATABASE_URL",
-                e,
-            ));
-        }
-    };
-    let api_port = match std::env::var("API_PORT") {
-        Ok(port) => port,
-        Err(e) => {
-            return Err(DataCollectorError::EnviromentVariableError("API_PORT", e));
-        }
-    };
-
-    // Create a connection pool
-    let pool = match PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
+    let cfg = Config::from_env();
+    let pool = PgPool::connect(&cfg.database_url)
         .await
-    {
-        Ok(pool) => pool,
-        Err(e) => {
-            return Err(DataCollectorError::PosgresConnectionError(e));
-        }
-    };
+        .expect("Failed to connect to database").await;
+
 
     let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
 
