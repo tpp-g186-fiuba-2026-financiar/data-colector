@@ -1,11 +1,11 @@
 use axum::Router;
 use data_collector::errors::project_errors::DataCollectorError;
 use sqlx::PgPool;
-use config::Config;
+use config;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    let cfg = Config::from_env();
+    let cfg = config::Config::from_env();
     let pool = PgPool::connect(&cfg.database_url)
         .await
         .expect("Failed to connect to database");
@@ -24,7 +24,7 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
 
     println!(
         "[Data Collector] API is now starting to deliver on port {} ({})",
-        api_port, formatted_addr
+        &cfg.port, formatted_addr
     );
 
     // 2. Then start the server
