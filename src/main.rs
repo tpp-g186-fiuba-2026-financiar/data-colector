@@ -1,7 +1,7 @@
 use axum::Router;
 use data_collector::errors::project_errors::DataCollectorError;
 use sqlx::PgPool;
-use config;
+mod config;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
