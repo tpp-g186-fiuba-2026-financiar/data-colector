@@ -8,6 +8,8 @@ pub enum DataCollectorError<'a> {
     PosgresConnectionError(sqlx::Error),
     TcpBindError(std::io::Error),
     AxumServeError(std::io::Error),
+    BymaScrapperError(&'a str),
+    BymaInformationNotAvailable(&'a str),
 }
 
 impl std::fmt::Display for DataCollectorError<'_> {
@@ -57,6 +59,16 @@ impl std::fmt::Display for DataCollectorError<'_> {
             }
             DataCollectorError::AxumServeError(err) => {
                 write!(f, "{}: Failed to start Axum server: {}", prefix, err)
+            }
+            DataCollectorError::BymaScrapperError(err) => {
+                write!(f, "{}: Failed to initialize BymaScrapper: {}", prefix, err)
+            }
+            DataCollectorError::BymaInformationNotAvailable(info) => {
+                write!(
+                    f,
+                    "{}: Information '{}' is not available from Byma",
+                    prefix, info
+                )
             }
         }
     }

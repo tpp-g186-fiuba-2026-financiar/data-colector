@@ -1,10 +1,32 @@
 use axum::Router;
-use data_collector::errors::project_errors::DataCollectorError;
+use data_collector::{
+    byma_scrapper::byma_session::BymaScrapper, errors::project_errors::DataCollectorError,
+};
 use sqlx::postgres::PgPoolOptions;
+use tokio::task::JoinHandle;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    // Lets load the .env file and apply it, if it fails, we throw error
+    let tickers_info: JoinHandle<Result<(), DataCollectorError>> = tokio::spawn(async {
+        loop {
+            let byma_scrapper: BymaScrapper = match BymaScrapper::new().await {
+                Ok(scrapper) => scrapper,
+                Err(e) => {
+                    let error_message = format!("Failed to create BymaScrapper: {}", e);
+                    return Err(DataCollectorError::BymaScrapperError(Box::leak(
+                        error_message.into_boxed_str(),
+                    )));
+                }
+            };
+
+            println!("[Data Collector] Fetching tickers information from Byma...");
+            println!("{:?}", byma_scrapper.get_all_available_tickers().await);
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+
+        Ok(())
+    });
+
     if let Err(e) = dotenv::dotenv() {
         return Err(DataCollectorError::EnviromentFileError(e));
     }
@@ -58,5 +80,15 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         return Err(DataCollectorError::AxumServeError(e));
     }
 
+    match tickers_info.await {
+        Ok(result) => {
+            if let Err(e) = result {
+                return Err(e);
+            }
+        }
+        Err(e) => {
+            eprintln!("Tickers info task panicked: {}", e);
+        }
+    }
     Ok(())
 }
