@@ -1,32 +1,13 @@
 use axum::Router;
 use data_collector::{
     byma_scrapper::byma_session::BymaScrapper, errors::project_errors::DataCollectorError,
+    persistence::ticker_repository,
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::task::JoinHandle;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    let tickers_info: JoinHandle<Result<(), DataCollectorError>> = tokio::spawn(async {
-        loop {
-            let byma_scrapper: BymaScrapper = match BymaScrapper::new().await {
-                Ok(scrapper) => scrapper,
-                Err(e) => {
-                    let error_message = format!("Failed to create BymaScrapper: {}", e);
-                    return Err(DataCollectorError::BymaScrapperError(Box::leak(
-                        error_message.into_boxed_str(),
-                    )));
-                }
-            };
-
-            println!("[Data Collector] Fetching tickers information from Byma...");
-            println!("{:?}", byma_scrapper.get_all_available_tickers().await);
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-        }
-
-        Ok(())
-    });
-
     if let Err(e) = dotenv::dotenv() {
         return Err(DataCollectorError::EnviromentFileError(e));
     }
@@ -47,7 +28,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         }
     };
 
-    // Create a connection pool
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -58,6 +38,41 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
             return Err(DataCollectorError::PosgresConnectionError(e));
         }
     };
+
+    if let Err(e) = sqlx::migrate!().run(&pool).await {
+        return Err(DataCollectorError::MigrationError(e));
+    }
+
+    let scraper_pool = pool.clone();
+    let tickers_info: JoinHandle<Result<(), DataCollectorError>> = tokio::spawn(async move {
+        loop {
+            let byma_scrapper: BymaScrapper = match BymaScrapper::new().await {
+                Ok(scrapper) => scrapper,
+                Err(e) => {
+                    eprintln!("[Data Collector] Failed to create BymaScrapper: {} — retrying in 60s", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                    continue;
+                }
+            };
+
+            println!("[Data Collector] Fetching tickers information from Byma...");
+            match byma_scrapper.get_all_available_tickers().await {
+                Ok(quotes) => {
+                    match ticker_repository::persist_quotes(&scraper_pool, &quotes).await {
+                        Ok(inserted) => println!(
+                            "[Data Collector] Persisted {} quote rows ({} fetched)",
+                            inserted,
+                            quotes.len()
+                        ),
+                        Err(e) => eprintln!("[Data Collector] Failed to persist quotes: {}", e),
+                    }
+                }
+                Err(e) => eprintln!("[Data Collector] Failed to fetch tickers: {}", e),
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
 
     let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
 
@@ -75,7 +90,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         api_port, formatted_addr
     );
 
-    // 2. Then start the server
     if let Err(e) = axum::serve(listener, app).await {
         return Err(DataCollectorError::AxumServeError(e));
     }

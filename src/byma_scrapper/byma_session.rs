@@ -1,9 +1,19 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
 use crate::errors::project_errors::DataCollectorError;
+
+#[derive(Debug, Clone)]
+pub struct TickerQuote {
+    pub symbol: String,
+    pub market: String,
+    pub opening_price: f64,
+    pub offered_price: f64,
+    pub recorded_at: DateTime<Utc>,
+}
 
 pub struct BymaScrapper {
     pub client: reqwest::Client,
@@ -50,28 +60,35 @@ impl BymaScrapper {
 
     pub async fn get_all_available_tickers(
         &self,
-    ) -> Result<Vec<String>, DataCollectorError<'static>> {
+    ) -> Result<Vec<TickerQuote>, DataCollectorError<'static>> {
         let urls_data = vec![
-            "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/general-equity",
-            "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/leading-equity",
+            (
+                "general-equity",
+                "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/general-equity",
+            ),
+            (
+                "leading-equity",
+                "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/leading-equity",
+            ),
         ];
 
         #[derive(Serialize, Deserialize, Debug)]
         struct TickersResponse {
             symbol: String,
             #[serde(rename = "offerPrice")]
-            offered_price: f32,
+            offered_price: f64,
             #[serde(rename = "openingPrice")]
-            opening_price: f32,
+            opening_price: f64,
         }
 
-        let mut handles: Vec<JoinHandle<Vec<String>>> = Vec::new();
+        let mut handles: Vec<JoinHandle<Vec<TickerQuote>>> = Vec::new();
 
-        for url in urls_data {
+        for (market, url) in urls_data {
             let client_clone = self.client.clone();
             let url_string = url.to_string();
+            let market_string = market.to_string();
 
-            let handle: JoinHandle<Vec<String>> = tokio::spawn(async move {
+            let handle: JoinHandle<Vec<TickerQuote>> = tokio::spawn(async move {
                 let payload: serde_json::Value = serde_json::json!({
                     "excludeZeroPxAndQty": true,
                     "T2": false,
@@ -80,7 +97,7 @@ impl BymaScrapper {
                     "Content-Type": "application/json",
                 });
 
-                let response = match client_clone.post(&*url).json(&payload).send().await {
+                let response = match client_clone.post(&*url_string).json(&payload).send().await {
                     Ok(resp) => resp,
                     Err(e) => {
                         eprintln!("Failed to send request to {}: {}", url_string, e);
@@ -121,22 +138,29 @@ impl BymaScrapper {
                     .filter_map(|item| serde_json::from_value(item).ok())
                     .collect();
 
-                // now, we remove those tickers have opening price and offered price equal to 0, because those are not active tickers
+                let recorded_at = Utc::now();
+
                 tickers
                     .into_iter()
-                    .filter(|ticker| ticker.opening_price != 0.0 && ticker.offered_price != 0.0)
-                    .map(|ticker| ticker.symbol)
+                    .filter(|t| t.opening_price != 0.0 && t.offered_price != 0.0)
+                    .map(|t| TickerQuote {
+                        symbol: t.symbol,
+                        market: market_string.clone(),
+                        opening_price: t.opening_price,
+                        offered_price: t.offered_price,
+                        recorded_at,
+                    })
                     .collect()
             });
 
             handles.push(handle);
         }
 
-        let mut tickers: Vec<String> = Vec::new();
+        let mut quotes: Vec<TickerQuote> = Vec::new();
 
         for handle in handles {
             match handle.await {
-                Ok(mut symbols) => tickers.append(&mut symbols),
+                Ok(mut batch) => quotes.append(&mut batch),
                 Err(e) => {
                     let text = format!("Failed to join task for fetching tickers: {}", e);
                     return Err(DataCollectorError::BymaScrapperError(Box::leak(
@@ -146,11 +170,11 @@ impl BymaScrapper {
             }
         }
 
-        match tickers.is_empty() {
+        match quotes.is_empty() {
             true => Err(DataCollectorError::BymaScrapperError(
                 "Failed to fetch any tickers from Byma",
             )),
-            false => Ok(tickers),
+            false => Ok(quotes),
         }
     }
 }

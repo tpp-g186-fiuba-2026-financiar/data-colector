@@ -10,6 +10,8 @@ pub enum DataCollectorError<'a> {
     AxumServeError(std::io::Error),
     BymaScrapperError(&'a str),
     BymaInformationNotAvailable(&'a str),
+    PersistenceError(sqlx::Error),
+    MigrationError(sqlx::migrate::MigrateError),
 }
 
 impl std::fmt::Display for DataCollectorError<'_> {
@@ -69,6 +71,12 @@ impl std::fmt::Display for DataCollectorError<'_> {
                     "{}: Information '{}' is not available from Byma",
                     prefix, info
                 )
+            }
+            DataCollectorError::PersistenceError(err) => {
+                write!(f, "{}: Persistence error: {}", prefix, err)
+            }
+            DataCollectorError::MigrationError(err) => {
+                write!(f, "{}: Migration error: {}", prefix, err)
             }
         }
     }
