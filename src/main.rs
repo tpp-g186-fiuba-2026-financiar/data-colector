@@ -28,7 +28,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         }
     };
 
-    // Create a connection pool
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -91,7 +90,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         api_port, formatted_addr
     );
 
-    // 2. Then start the server
     if let Err(e) = axum::serve(listener, app).await {
         return Err(DataCollectorError::AxumServeError(e));
     }

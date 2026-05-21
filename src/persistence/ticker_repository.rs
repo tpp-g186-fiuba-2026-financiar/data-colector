@@ -4,10 +4,6 @@ use sqlx::PgPool;
 
 use crate::byma_scrapper::byma_session::TickerQuote;
 
-/// Persist a batch of quotes: upserts the tickers catalog and bulk-inserts the quotes.
-///
-/// Returns the number of quote rows that were actually inserted (duplicates on the
-/// `(ticker_id, recorded_at)` PK are skipped via `ON CONFLICT DO NOTHING`).
 pub async fn persist_quotes(
     pool: &PgPool,
     quotes: &[TickerQuote],
@@ -18,8 +14,6 @@ pub async fn persist_quotes(
 
     let mut tx = pool.begin().await?;
 
-    // Dedupe the (symbol, market) pairs before upserting — a single fetch can return
-    // the same symbol from multiple equity lists, no point sending duplicates to the DB.
     let mut catalog: HashMap<&str, &str> = HashMap::new();
     for q in quotes {
         catalog.insert(q.symbol.as_str(), q.market.as_str());
@@ -52,7 +46,6 @@ pub async fn persist_quotes(
     let mut offered_prices: Vec<f64> = Vec::with_capacity(quotes.len());
 
     for q in quotes {
-        // Should always be Some — we just inserted every symbol above.
         let Some(&ticker_id) = symbol_to_id.get(&q.symbol) else {
             continue;
         };

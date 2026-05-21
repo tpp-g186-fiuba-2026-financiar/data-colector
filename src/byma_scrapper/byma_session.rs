@@ -138,11 +138,8 @@ impl BymaScrapper {
                     .filter_map(|item| serde_json::from_value(item).ok())
                     .collect();
 
-                // We take a single timestamp per fetch so all quotes in the same batch
-                // share the same recorded_at — makes it easier to group snapshots by time.
                 let recorded_at = Utc::now();
 
-                // Drop tickers with zero opening/offered price (they are not actively traded).
                 tickers
                     .into_iter()
                     .filter(|t| t.opening_price != 0.0 && t.offered_price != 0.0)
