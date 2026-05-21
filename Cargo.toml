@@ -9,5 +9,6 @@ tokio = { version = "1.0", features = ["full"] }
 axum = "0.8.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "chrono", "macros", "migrate"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "native-tls"] }
+chrono = { version = "0.4", features = ["serde"] }
