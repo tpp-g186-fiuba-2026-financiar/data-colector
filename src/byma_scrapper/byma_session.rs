@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -64,11 +64,15 @@ impl BymaScrapper {
         let urls_data = vec![
             (
                 "general-equity",
-                "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/general-equity",
+                "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/general-equity",
             ),
             (
                 "leading-equity",
-                "https://open.bymadata.com.ar//vanoms-be-core/rest/api/bymadata/free/leading-equity",
+                "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/leading-equity",
+            ),
+            (
+                "cedears",
+                "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cedears",
             ),
         ];
 
@@ -81,86 +85,126 @@ impl BymaScrapper {
             opening_price: f64,
         }
 
-        let mut handles: Vec<JoinHandle<Vec<TickerQuote>>> = Vec::new();
+        let mut handles: Vec<JoinHandle<Result<(Vec<TickerQuote>, String), String>>> = Vec::new();
 
         for (market, url) in urls_data {
             let client_clone = self.client.clone();
             let url_string = url.to_string();
             let market_string = market.to_string();
 
-            let handle: JoinHandle<Vec<TickerQuote>> = tokio::spawn(async move {
-                let payload: serde_json::Value = serde_json::json!({
-                    "excludeZeroPxAndQty": true,
-                    "T2": false,
-                    "T1": true,
-                    "T0": false,
-                    "Content-Type": "application/json",
-                });
+            let handle: JoinHandle<Result<(Vec<TickerQuote>, String), String>> =
+                tokio::spawn(async move {
+                    let payload: serde_json::Value = serde_json::json!({
+                        "excludeZeroPxAndQty": true,
+                        "T2": false,
+                        "T1": true,
+                        "T0": false,
+                        "Content-Type": "application/json",
+                    });
 
-                let response = match client_clone.post(&*url_string).json(&payload).send().await {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        eprintln!("Failed to send request to {}: {}", url_string, e);
-                        return vec![];
-                    }
-                };
+                    let response = match client_clone.post(&*url_string).json(&payload).send().await
+                    {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            eprintln!("Failed to send request to {}: {}", url_string, e);
+                            return Err(market.to_string());
+                        }
+                    };
 
-                if !response.status().is_success() {
-                    eprintln!(
-                        "Received non-success status code {} from {}",
-                        response.status(),
-                        url_string
-                    );
-                    return vec![];
-                }
-
-                let site_response: serde_json::Value = match response.json().await {
-                    Ok(json) => json,
-                    Err(e) => {
-                        eprintln!("Failed to parse JSON response from {}: {}", url_string, e);
-                        return vec![];
-                    }
-                };
-
-                let site_data: Vec<serde_json::Value> = match site_response["data"].as_array() {
-                    Some(data) => data.clone(),
-                    None => {
+                    if !response.status().is_success() {
                         eprintln!(
-                            "Expected 'data' field to be an array in response from {}",
+                            "Received non-success status code {} from {}",
+                            response.status(),
                             url_string
                         );
-                        return vec![];
+                        return Err(market.to_string());
                     }
-                };
 
-                let tickers: Vec<TickersResponse> = site_data
-                    .into_iter()
-                    .filter_map(|item| serde_json::from_value(item).ok())
-                    .collect();
+                    let site_response: serde_json::Value = match response.json().await {
+                        Ok(json) => json,
+                        Err(e) => {
+                            eprintln!("Failed to parse JSON response from {}: {}", url_string, e);
+                            return Err(market.to_string());
+                        }
+                    };
 
-                let recorded_at = Utc::now();
+                    let tickers_data: Vec<TickersResponse> = match site_response["data"].as_array()
+                    {
+                        Some(data) => data
+                            .iter()
+                            .filter_map(|item| serde_json::from_value(item.clone()).ok())
+                            .collect(),
+                        None => {
+                            // Cedears endpoint returns as object of Tickersdata so we need to get them from there or else
+                            // throw error
 
-                tickers
-                    .into_iter()
-                    .filter(|t| t.opening_price != 0.0 && t.offered_price != 0.0)
-                    .map(|t| TickerQuote {
-                        symbol: t.symbol,
-                        market: market_string.clone(),
-                        opening_price: t.opening_price,
-                        offered_price: t.offered_price,
-                        recorded_at,
-                    })
-                    .collect()
-            });
+                            let response_as_vec_object: Vec<serde_json::Value> =
+                                match site_response.as_array() {
+                                    Some(data) => data.clone(),
+                                    None => {
+                                        eprintln!(
+                                            "Expected response to be an array in response from {}",
+                                            url_string
+                                        );
+                                        return Err(market.to_string());
+                                    }
+                                };
+
+                            response_as_vec_object
+                                .into_iter()
+                                .filter_map(|item| serde_json::from_value(item).ok())
+                                .collect()
+                        }
+                    };
+
+                    // lets get GMT -3 timezone for Argentina
+                    let recorded_at = Utc::now() - chrono::Duration::hours(3);
+
+                    Ok((
+                        tickers_data
+                            .into_iter()
+                            .filter(|t| t.opening_price != 0.0 && t.offered_price != 0.0)
+                            .map(|t| TickerQuote {
+                                symbol: t.symbol,
+                                market: market_string.clone(),
+                                opening_price: t.opening_price,
+                                offered_price: t.offered_price,
+                                recorded_at,
+                            })
+                            .collect(),
+                        market_string,
+                    ))
+                });
 
             handles.push(handle);
+
+            tokio::time::sleep(Duration::from_millis(650)).await;
         }
 
         let mut quotes: Vec<TickerQuote> = Vec::new();
 
         for handle in handles {
             match handle.await {
-                Ok(mut batch) => quotes.append(&mut batch),
+                Ok(opt_batch) => match opt_batch {
+                    Ok((batch, site)) => {
+                        eprintln!(
+                            "[Data Collector] Fetched {} tickers in this {}!",
+                            batch.len(),
+                            site
+                        );
+                        quotes.append(&mut batch.clone());
+                    }
+                    Err(market_err) => {
+                        let msg = format!(
+                            "[Data Collector] Endpoint from {} is returning no information",
+                            market_err
+                        );
+                        eprintln!("{}", msg);
+                        return Err(DataCollectorError::BymaScrapperError(Box::leak(
+                            msg.into_boxed_str(),
+                        )));
+                    }
+                },
                 Err(e) => {
                     let text = format!("Failed to join task for fetching tickers: {}", e);
                     return Err(DataCollectorError::BymaScrapperError(Box::leak(
@@ -172,7 +216,7 @@ impl BymaScrapper {
 
         match quotes.is_empty() {
             true => Err(DataCollectorError::BymaScrapperError(
-                "Failed to fetch any tickers from Byma",
+                "Failed to fetch any tickers from BYMA (No data)",
             )),
             false => Ok(quotes),
         }
