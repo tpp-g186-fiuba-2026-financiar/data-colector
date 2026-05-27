@@ -1,17 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use sqlx::PgPool;
 
 use crate::byma_scrapper::byma_session::TickerQuote;
 
-pub async fn persist_quotes(
-    pool: &PgPool,
-    quotes: &[TickerQuote],
-) -> Result<u64, sqlx::Error> {
-    if quotes.is_empty() {
-        return Ok(0);
-    }
-
+pub async fn persist_quotes(pool: Arc<PgPool>, quotes: &[TickerQuote]) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     let mut catalog: HashMap<&str, &str> = HashMap::new();
@@ -38,6 +31,7 @@ pub async fn persist_quotes(
     .fetch_all(&mut *tx)
     .await?;
 
+    /*
     let symbol_to_id: HashMap<String, i32> = rows.into_iter().map(|(id, sym)| (sym, id)).collect();
 
     let mut ticker_ids: Vec<i32> = Vec::with_capacity(quotes.len());
@@ -67,9 +61,10 @@ pub async fn persist_quotes(
     .bind(&opening_prices)
     .bind(&offered_prices)
     .execute(&mut *tx)
-    .await?;
+    .await?;*/
 
     tx.commit().await?;
 
-    Ok(result.rows_affected())
+    //Ok(result.rows_affected())
+    Ok(rows.len() as u64)
 }
