@@ -85,6 +85,7 @@ impl BymaScrapper {
             opening_price: f64,
         }
 
+        #[allow(clippy::type_complexity)]
         let mut handles: Vec<JoinHandle<Result<(Vec<TickerQuote>, String), String>>> = Vec::new();
 
         for (market, url) in urls_data {
