@@ -1,10 +1,9 @@
 use axum::Router;
 use data_collector::{
-    byma_scrapper::byma_session::BymaScrapper, errors::project_errors::DataCollectorError,
-    persistence::ticker_repository,
+    byma_scrapper::byma_persist_tickers::BymaTickersPersistor,
+    errors::project_errors::DataCollectorError,
 };
 use sqlx::postgres::PgPoolOptions;
-use tokio::task::JoinHandle;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
@@ -44,6 +43,11 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
     }
 
     let scraper_pool = pool.clone();
+
+    tokio::spawn(BymaTickersPersistor::persist_available_tickers(
+        scraper_pool.clone(),
+    ));
+    /*
     let tickers_info: JoinHandle<Result<(), DataCollectorError>> = tokio::spawn(async move {
         loop {
             let byma_scrapper: BymaScrapper = match BymaScrapper::new().await {
@@ -70,9 +74,9 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
                 Err(e) => eprintln!("[Data Collector] Failed to fetch tickers: {}", e),
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(tokio::time::Duration::from_hours(1)).await; // each hour, we do a new fetch of tickers.
         }
-    });
+    });*/
 
     let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
 
@@ -94,15 +98,5 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         return Err(DataCollectorError::AxumServeError(e));
     }
 
-    match tickers_info.await {
-        Ok(result) => {
-            if let Err(e) = result {
-                return Err(e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Tickers info task panicked: {}", e);
-        }
-    }
     Ok(())
 }
