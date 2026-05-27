@@ -1,8 +1,13 @@
-use axum::routing::get;
+use axum::routing::{get, post};
 
-use crate::endpoints::{health::HealthHandler, root::RootHandler};
+use crate::endpoints::{
+    available_tickers::AvailableTickers, health::HealthHandler, historical_data::HistoricalData,
+    root::RootHandler,
+};
 
+pub mod available_tickers;
 pub mod health;
+pub mod historical_data;
 pub mod root;
 
 pub fn data_collector_router(state_sqlxpool: sqlx::PgPool) -> axum::Router {
@@ -11,5 +16,13 @@ pub fn data_collector_router(state_sqlxpool: sqlx::PgPool) -> axum::Router {
         .route("/health", get(HealthHandler::health_check))
         // Shows a message on the browser;
         .route("/", get(RootHandler::root_check))
+        .route(
+            "/available-tickers",
+            post(AvailableTickers::api_get_available_tickers),
+        )
+        .route(
+            "/historical-data/{ticker}",
+            post(HistoricalData::api_get_historical_data),
+        )
         .with_state(state_sqlxpool)
 }
