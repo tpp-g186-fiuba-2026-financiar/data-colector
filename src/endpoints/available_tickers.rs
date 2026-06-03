@@ -9,16 +9,17 @@ impl AvailableTickers {
         // lets make a sql query to get all the tickers available in the database, and return them as a json response
 
         // Notice we use `query_scalar` instead of `query`
-        let tickers: Option<Vec<String>> = match sqlx::query_scalar("SELECT symbol FROM tickers")
-            .fetch_all(&pool)
-            .await
-        {
-            Ok(tickers) => Some(tickers), // This is now a Vec<String>
-            Err(e) => {
-                eprintln!("Failed to fetch tickers from database: {}", e);
-                None
-            }
-        };
+        let tickers: Option<Vec<String>> =
+            match sqlx::query_scalar("SELECT symbol FROM available_tickers_byma")
+                .fetch_all(&pool)
+                .await
+            {
+                Ok(tickers) => Some(tickers), // This is now a Vec<String>
+                Err(e) => {
+                    eprintln!("Failed to fetch tickers from database: {}", e);
+                    None
+                }
+            };
 
         let (code, message) = match tickers {
             Some(tickers) => {

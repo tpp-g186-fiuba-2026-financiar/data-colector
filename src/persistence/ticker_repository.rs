@@ -1,8 +1,45 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sqlx::PgPool;
-
 use crate::byma_scrapper::byma_session::TickerQuote;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use yfinance_rs::Candle;
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
+pub struct TickerHistoricalData {
+    pub ticker: String,
+    pub ts: i64,
+    pub volume: i64,
+    pub open_amount: Decimal,
+    pub high_amount: Decimal,
+    pub low_amount: Decimal,
+    pub close_amount: Decimal,
+    pub close_unadj_amount: Decimal,
+}
+
+impl TickerHistoricalData {
+    pub fn from_candle(candle: &Candle, ticker: &str) -> Self {
+        let volume_int = candle.volume.unwrap_or(0) as i64;
+
+        // Try calling .amount() as a method instead of a field
+        let unadj_price = match &candle.close_unadj {
+            Some(price) => price.amount(),
+            None => candle.close.amount(),
+        };
+
+        Self {
+            ticker: ticker.to_string(),
+            ts: candle.ts.timestamp_millis(),
+            volume: volume_int,
+            open_amount: candle.open.amount(),
+            high_amount: candle.high.amount(),
+            low_amount: candle.low.amount(),
+            close_amount: candle.close.amount(),
+            close_unadj_amount: unadj_price,
+        }
+    }
+}
 
 pub async fn persist_quotes(pool: Arc<PgPool>, quotes: &[TickerQuote]) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -20,7 +57,7 @@ pub async fn persist_quotes(pool: Arc<PgPool>, quotes: &[TickerQuote]) -> Result
 
     let rows: Vec<(i32, String)> = sqlx::query_as(
         r#"
-        INSERT INTO tickers (symbol, market)
+        INSERT INTO available_tickers_byma (symbol, market)
         SELECT * FROM UNNEST($1::text[], $2::text[])
         ON CONFLICT (symbol) DO UPDATE SET market = EXCLUDED.market
         RETURNING id, symbol
@@ -67,4 +104,72 @@ pub async fn persist_quotes(pool: Arc<PgPool>, quotes: &[TickerQuote]) -> Result
 
     //Ok(result.rows_affected())
     Ok(rows.len() as u64)
+}
+
+/// If there is historical data for the given ticker, returns an option.
+/// If there is no historical data for the given ticker, returns None.
+/// if there is historical data for the given ticker, returns a vector of TickerHistoricalData.
+/// If there is an error while fetching the historical data from the database, returns an error.
+pub async fn is_historical_data_available(
+    pool: PgPool,
+    ticker_symbol: &str,
+) -> Result<Option<(Vec<TickerHistoricalData>, i64)>, sqlx::Error> {
+    let result: Vec<TickerHistoricalData> = sqlx::query_as(
+        r#"
+        SELECT * FROM ticker_history_data_cached_yf WHERE ticker = $1
+        "#,
+    )
+    .bind(ticker_symbol)
+    .fetch_all(&pool)
+    .await?;
+
+    match result.is_empty() {
+        true => Ok(None),
+        false => {
+            // since primary key is ts is ts, we can get the latest ts from the result vector
+            let latest_ts = result.iter().map(|data| data.ts).max().unwrap_or(0);
+            Ok(Some((result, latest_ts)))
+        }
+    }
+}
+
+pub async fn update_historical_data(
+    pool: PgPool,
+    ticker_symbol: &str,
+    new_data: Vec<TickerHistoricalData>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Delete old data for the ticker
+    sqlx::query(
+        r#"
+        DELETE FROM ticker_history_data_cached_yf WHERE ticker = $1
+        "#,
+    )
+    .bind(ticker_symbol)
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert new data for the ticker
+    for data in new_data {
+        sqlx::query(
+            r#"
+            INSERT INTO ticker_history_data_cached_yf (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(&data.ticker)
+        .bind(data.ts)
+        .bind(data.volume)
+        .bind(data.open_amount)
+        .bind(data.high_amount)
+        .bind(data.low_amount)
+        .bind(data.close_amount)
+        .bind(data.close_unadj_amount)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
 }

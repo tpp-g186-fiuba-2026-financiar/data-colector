@@ -1,8 +1,7 @@
 use axum::routing::{get, post};
 
 use crate::endpoints::{
-    available_tickers::AvailableTickers, health::HealthHandler, historical_data::HistoricalData,
-    root::RootHandler,
+    available_tickers::AvailableTickers, health::HealthHandler, root::RootHandler,
 };
 
 pub mod available_tickers;
@@ -22,7 +21,7 @@ pub fn data_collector_router(state_sqlxpool: sqlx::PgPool) -> axum::Router {
         )
         .route(
             "/historical-data/{ticker}",
-            post(HistoricalData::api_get_historical_data),
+            post(historical_data::api_get_historical_data),
         )
         .with_state(state_sqlxpool)
 }
