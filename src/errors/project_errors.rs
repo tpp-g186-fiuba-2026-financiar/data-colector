@@ -12,6 +12,7 @@ pub enum DataCollectorError<'a> {
     BymaInformationNotAvailable(&'a str),
     PersistenceError(sqlx::Error),
     MigrationError(sqlx::migrate::MigrateError),
+    YFinanceClientError(yfinance_rs::YfError),
 }
 
 impl std::fmt::Display for DataCollectorError<'_> {
@@ -77,6 +78,9 @@ impl std::fmt::Display for DataCollectorError<'_> {
             }
             DataCollectorError::MigrationError(err) => {
                 write!(f, "{}: Migration error: {}", prefix, err)
+            }
+            DataCollectorError::YFinanceClientError(err) => {
+                write!(f, "{}: YFinance client error: {}", prefix, err)
             }
         }
     }

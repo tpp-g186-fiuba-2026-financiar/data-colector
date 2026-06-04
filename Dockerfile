@@ -32,7 +32,6 @@ RUN rm -f target/release/deps/data_collector* target/release/data-collector*
 
 # 5. Copy the actual source code and environment file
 COPY src ./src
-COPY .env ./
 
 # 6. Update the timestamp on main.rs to force Cargo to recompile the application logic
 RUN touch src/main.rs
@@ -48,7 +47,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/data-collector .
-COPY --from=builder /app/.env .
 
 EXPOSE 3000
 CMD ["./data-collector"]

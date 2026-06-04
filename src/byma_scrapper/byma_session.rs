@@ -11,7 +11,7 @@ pub struct TickerQuote {
     pub symbol: String,
     pub market: String,
     pub opening_price: f64,
-    pub offered_price: f64,
+    pub bid_price: f64,
     pub recorded_at: DateTime<Utc>,
 }
 
@@ -81,8 +81,8 @@ impl BymaScrapper {
             symbol: String,
             #[serde(rename = "offerPrice")]
             offered_price: f64,
-            #[serde(rename = "openingPrice")]
-            opening_price: f64,
+            #[serde(rename = "bidPrice")]
+            bid_price: f64,
         }
 
         #[allow(clippy::type_complexity)]
@@ -164,12 +164,12 @@ impl BymaScrapper {
                     Ok((
                         tickers_data
                             .into_iter()
-                            .filter(|t| t.opening_price != 0.0 && t.offered_price != 0.0)
+                            .filter(|t| t.offered_price != 0.0 && t.bid_price != 0.0)
                             .map(|t| TickerQuote {
                                 symbol: t.symbol,
                                 market: market_string.clone(),
-                                opening_price: t.opening_price,
-                                offered_price: t.offered_price,
+                                opening_price: t.offered_price,
+                                bid_price: t.bid_price,
                                 recorded_at,
                             })
                             .collect(),
