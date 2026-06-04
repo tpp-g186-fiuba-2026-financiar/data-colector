@@ -1,13 +1,14 @@
+use crate::endpoints::DCState;
 use axum::{extract::State, http::StatusCode};
 
 pub struct AvailableTickers;
 
 impl AvailableTickers {
     pub async fn api_get_available_tickers(
-        State(pool): State<sqlx::PgPool>,
+        State(dc_state): State<DCState>,
     ) -> axum::Json<serde_json::Value> {
         // lets make a sql query to get all the tickers available in the database, and return them as a json response
-
+        let pool = dc_state.sqlx_pool;
         // Notice we use `query_scalar` instead of `query`
         let tickers: Option<Vec<String>> =
             match sqlx::query_scalar("SELECT symbol FROM available_tickers_byma")

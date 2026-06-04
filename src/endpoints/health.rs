@@ -1,10 +1,12 @@
+use crate::endpoints::DCState;
 use axum::{extract::State, http::StatusCode};
 
 pub struct HealthHandler;
 
 impl HealthHandler {
-    pub async fn health_check(State(pool): State<sqlx::PgPool>) -> axum::Json<serde_json::Value> {
+    pub async fn health_check(State(dc_state): State<DCState>) -> axum::Json<serde_json::Value> {
         // lets return a simple json response with the status of the database connection
+        let pool = dc_state.sqlx_pool;
         let (code, message) = match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => (
                 StatusCode::OK,

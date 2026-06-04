@@ -1,3 +1,4 @@
+use crate::endpoints::DCState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -7,9 +8,11 @@ use yfinance_rs::{Range, Ticker, YfClient};
 use crate::persistence::ticker_repository::{self, TickerHistoricalData};
 
 pub async fn api_get_historical_data(
-    State(pool): State<sqlx::PgPool>,
+    State(dc_state): State<DCState>,
     Path(ticker): Path<String>,
 ) -> axum::Json<serde_json::Value> {
+    let (pool, yf_client) = (dc_state.sqlx_pool.clone(), dc_state.yf_client.clone());
+
     let historical_data =
         ticker_repository::is_historical_data_available(pool.clone(), &ticker).await;
 
@@ -33,30 +36,28 @@ pub async fn api_get_historical_data(
 
             if five_days_ago.timestamp() > last_updated_timestamp {
                 // Fixed: Calling the clean standalone helper function instead of a local closure variable
-                let new_data = fetch_yf_history_helper(&ticker).await;
+                let new_data = fetch_yf_history_helper(&yf_client, &ticker).await;
 
                 match new_data {
                     Ok(new_data) => {
-                        let update_result = ticker_repository::update_historical_data(
-                            pool,
-                            &ticker,
-                            new_data.clone(),
-                        )
-                        .await;
+                        let data = new_data.clone();
+                        tokio::spawn(async move {
+                            let update_result = ticker_repository::update_historical_data(
+                                pool.clone(),
+                                &ticker,
+                                new_data.clone(),
+                            )
+                            .await;
 
-                        if update_result.is_err() {
-                            eprintln!(
-                                "Failed to update historical data in database: {}",
-                                update_result.err().unwrap()
-                            );
-                            let response = serde_json::json!({
-                                "status": StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
-                                "message": serde_json::json!({ "error": "Failed to update historical data in database" }),
-                            });
-                            return axum::Json(response);
-                        }
+                            if update_result.is_err() {
+                                eprintln!(
+                                    "Failed to update historical data in database: {}",
+                                    update_result.err().unwrap()
+                                );
+                            }
+                        });
 
-                        (new_data, true)
+                        (data, true)
                     }
                     Err(e) => {
                         eprintln!("Error fetching updated data: {}", e);
@@ -73,22 +74,21 @@ pub async fn api_get_historical_data(
         }
         Ok(None) => {
             // Fetch cleanly from Yahoo Finance using our extracted routine
-            match fetch_yf_history_helper(&ticker).await {
+            match fetch_yf_history_helper(&yf_client, &ticker).await {
                 Ok(historical_data) => {
-                    // lets persist this data in the database.
-                    let update_result = ticker_repository::update_historical_data(
-                        pool,
-                        &ticker,
-                        historical_data.clone(),
-                    )
-                    .await;
+                    let data: Vec<TickerHistoricalData> = historical_data.clone();
+                    tokio::spawn(async move {
+                        let update_result =
+                            ticker_repository::update_historical_data(pool, &ticker, data.clone())
+                                .await;
 
-                    if update_result.is_err() {
-                        eprintln!(
-                            "Failed to persist historical data in database: {}",
-                            update_result.err().unwrap()
-                        );
-                    }
+                        if update_result.is_err() {
+                            eprintln!(
+                                "Failed to persist historical data in database: {}",
+                                update_result.err().unwrap()
+                            );
+                        }
+                    });
 
                     (historical_data, false)
                 }
@@ -122,13 +122,11 @@ pub async fn api_get_historical_data(
 }
 
 /// Standalone helper function to cleanly process the Yahoo Finance remote tracking
-async fn fetch_yf_history_helper(ticker: &str) -> Result<Vec<TickerHistoricalData>, String> {
-    let yfinance_client = YfClient::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        .build()
-        .map_err(|e| format!("Failed to create YF client: {}", e))?;
-
-    let yfinance_ticker = Ticker::new(&yfinance_client, format!("{}.BA", ticker));
+async fn fetch_yf_history_helper(
+    yf_client: &YfClient,
+    ticker: &str,
+) -> Result<Vec<TickerHistoricalData>, String> {
+    let yfinance_ticker = Ticker::new(yf_client, format!("{}.BA", ticker));
 
     let history_data = yfinance_ticker
         .history(Some(Range::Y10), Some(yfinance_rs::Interval::D1), false)
