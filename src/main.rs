@@ -1,15 +1,21 @@
 use axum::Router;
 use data_collector::{
-    byma_scrapper::byma_persist_tickers::BymaTickersPersistor,
+    byma_scrapper::{
+        byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
+        byma_persist_tickers::BymaTickersPersistor,
+    },
+    endpoints::DCState,
     errors::project_errors::DataCollectorError,
 };
 use sqlx::postgres::PgPoolOptions;
+use yfinance_rs::YfClient;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    //if let Err(e) = dotenv::dotenv() {
-    //    return Err(DataCollectorError::EnviromentFileError(e));
-    //}
+    if dotenv::dotenv().is_err() {
+        // No longer crashing because dotenv isn't available now.
+        eprintln!("[Data-Collector] No .env found, so most likely you're on prod!")
+    }
 
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
@@ -47,38 +53,27 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
     tokio::spawn(BymaTickersPersistor::persist_available_tickers(
         scraper_pool.clone(),
     ));
-    /*
-    let tickers_info: JoinHandle<Result<(), DataCollectorError>> = tokio::spawn(async move {
-        loop {
-            let byma_scrapper: BymaScrapper = match BymaScrapper::new().await {
-                Ok(scrapper) => scrapper,
-                Err(e) => {
-                    eprintln!("[Data Collector] Failed to create BymaScrapper: {} — retrying in 60s", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                    continue;
-                }
-            };
 
-            println!("[Data Collector] Fetching tickers information from Byma...");
-            match byma_scrapper.get_all_available_tickers().await {
-                Ok(quotes) => {
-                    match ticker_repository::persist_quotes(&scraper_pool, &quotes).await {
-                        Ok(inserted) => println!(
-                            "[Data Collector] Persisted {} quote rows ({} fetched)",
-                            inserted,
-                            quotes.len()
-                        ),
-                        Err(e) => eprintln!("[Data Collector] Failed to persist quotes: {}", e),
-                    }
-                }
-                Err(e) => eprintln!("[Data Collector] Failed to fetch tickers: {}", e),
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_hours(1)).await; // each hour, we do a new fetch of tickers.
+    let yfinance_client = match YfClient::builder()
+    .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(DataCollectorError::YFinanceClientError(e));
         }
-    });*/
+    };
 
-    let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
+    let dc_state = DCState {
+        sqlx_pool: pool.clone(),
+        yf_client: yfinance_client,
+    };
+
+    tokio::spawn(
+        BymaTickerHistoricalDataPersistor::persist_historical_price_tickers(dc_state.clone()),
+    );
+
+    let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
