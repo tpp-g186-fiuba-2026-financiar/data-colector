@@ -47,7 +47,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/data-collector .
-COPY --from=builder /app/.env .
 
 EXPOSE 3000
 CMD ["./data-collector"]
