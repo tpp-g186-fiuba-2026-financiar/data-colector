@@ -116,7 +116,7 @@ impl BymaTickerHistoricalDataPersistor {
                 }
             }
 
-            let random_timeout = rand::thread_rng().gen_range(2..=12);
+            let random_timeout = rand::thread_rng().gen_range(2..=4);
             tokio::time::sleep(std::time::Duration::from_secs(random_timeout * 60)).await;
         }
     }
