@@ -170,6 +170,17 @@ pub async fn update_historical_data(
         .await?;
     }
 
+    // Now, lets add a update into last_history_price_cached_at from table available_tickers_byma
+
+    sqlx::query(
+        r#"
+        UPDATE available_tickers_byma SET last_history_price_cached_at = NOW() WHERE symbol = $1
+        "#,
+    )
+    .bind(ticker_symbol)
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
     Ok(())
 }
