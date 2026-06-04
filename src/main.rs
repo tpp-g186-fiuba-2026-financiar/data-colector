@@ -1,12 +1,20 @@
 use axum::Router;
-use data_collector::errors::project_errors::DataCollectorError;
+use data_collector::{
+    byma_scrapper::{
+        byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
+        byma_persist_tickers::BymaTickersPersistor,
+    },
+    endpoints::DCState,
+    errors::project_errors::DataCollectorError,
+};
 use sqlx::postgres::PgPoolOptions;
+use yfinance_rs::YfClient;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    // Lets load the .env file and apply it, if it fails, we throw error
-    if let Err(e) = dotenv::dotenv() {
-        return Err(DataCollectorError::EnviromentFileError(e));
+    if dotenv::dotenv().is_err() {
+        // No longer crashing because dotenv isn't available now.
+        eprintln!("[Data-Collector] No .env found, so most likely you're on prod!")
     }
 
     let db_url = match std::env::var("DATABASE_URL") {
@@ -25,7 +33,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         }
     };
 
-    // Create a connection pool
     let pool = match PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -37,7 +44,36 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         }
     };
 
-    let app = Router::new().merge(data_collector::endpoints::data_collector_router(pool));
+    if let Err(e) = sqlx::migrate!().run(&pool).await {
+        return Err(DataCollectorError::MigrationError(e));
+    }
+
+    let scraper_pool = pool.clone();
+
+    tokio::spawn(BymaTickersPersistor::persist_available_tickers(
+        scraper_pool.clone(),
+    ));
+
+    let yfinance_client = match YfClient::builder()
+    .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return Err(DataCollectorError::YFinanceClientError(e));
+        }
+    };
+
+    let dc_state = DCState {
+        sqlx_pool: pool.clone(),
+        yf_client: yfinance_client,
+    };
+
+    tokio::spawn(
+        BymaTickerHistoricalDataPersistor::persist_historical_price_tickers(dc_state.clone()),
+    );
+
+    let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
@@ -53,7 +89,6 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         api_port, formatted_addr
     );
 
-    // 2. Then start the server
     if let Err(e) = axum::serve(listener, app).await {
         return Err(DataCollectorError::AxumServeError(e));
     }
