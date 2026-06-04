@@ -7,9 +7,9 @@ use sqlx::postgres::PgPoolOptions;
 
 #[tokio::main]
 async fn main() -> Result<(), DataCollectorError<'static>> {
-    if let Err(e) = dotenv::dotenv() {
-        return Err(DataCollectorError::EnviromentFileError(e));
-    }
+    //if let Err(e) = dotenv::dotenv() {
+    //    return Err(DataCollectorError::EnviromentFileError(e));
+    //}
 
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
