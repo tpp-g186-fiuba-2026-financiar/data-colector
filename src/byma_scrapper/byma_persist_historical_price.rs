@@ -22,7 +22,7 @@ impl BymaTickerHistoricalDataPersistor {
 
             let five_days_ago = chrono::Utc::now() - chrono::Duration::days(5);
             let query = format!(
-                "SELECT symbol FROM available_tickers_byma WHERE last_history_price_cached_at IS NULL OR last_history_price_cached_at < to_timestamp({}) ORDER BY market DESC LIMIT 8",
+                "SELECT symbol FROM available_tickers_byma WHERE market <> 'COMMODITY' AND (last_history_price_cached_at IS NULL OR last_history_price_cached_at < to_timestamp({})) ORDER BY market DESC LIMIT 8",
                 five_days_ago.timestamp()
             );
             let tickers: Vec<String> = match sqlx::query(&query).fetch_all(&*arc_pool).await {

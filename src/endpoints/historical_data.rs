@@ -3,10 +3,48 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use serde::Serialize;
+use utoipa::ToSchema;
 use yfinance_rs::{Range, Ticker, YfClient};
 
 use crate::persistence::ticker_repository::{self, TickerHistoricalData};
 
+#[derive(Serialize, ToSchema)]
+pub struct HistoricalDataResponse {
+    /// HTTP status code returned by the endpoint
+    pub status: u16,
+    /// Vector of historical candles for the requested ticker
+    #[schema(value_type = Vec<Object>)]
+    pub data: serde_json::Value,
+    /// `true` if the data was served from cache (or freshly cached), `false` if it was fetched live
+    pub cached: bool,
+}
+
+#[utoipa::path(
+    post,
+    path = "/historical-data/{ticker}",
+    params(
+        ("ticker" = String, Path, description = "Clean ticker symbol (e.g. GGAL, YPF, GOLD, OIL). BYMA tickers are resolved with the .BA suffix; commodities use their internal symbol.")
+    ),
+    responses(
+        (status = 200, description = "Historical candles for the ticker", body = HistoricalDataResponse, example = json!({
+            "status": 200,
+            "data": [{
+                "ticker": "GGAL",
+                "ts": 1747008000000_i64,
+                "volume": 12345,
+                "open_amount": "100.50",
+                "high_amount": "105.00",
+                "low_amount": "99.75",
+                "close_amount": "104.20",
+                "close_unadj_amount": "104.20"
+            }],
+            "cached": true
+        })),
+        (status = 500, description = "Either Yahoo Finance or the database failed", body = serde_json::Value)
+    ),
+    tag = "Historical Data"
+)]
 pub async fn api_get_historical_data(
     State(dc_state): State<DCState>,
     Path(ticker): Path<String>,
