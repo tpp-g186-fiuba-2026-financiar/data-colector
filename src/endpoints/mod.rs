@@ -1,7 +1,10 @@
 use axum::routing::{get, post};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::endpoints::{
-    available_tickers::AvailableTickers, health::HealthHandler, root::RootHandler,
+    available_tickers::AvailableTickersResponse, health::HealthResponse,
+    historical_data::HistoricalDataResponse,
 };
 use yfinance_rs::YfClient;
 
@@ -16,23 +19,52 @@ pub struct DCState {
     pub yf_client: YfClient,
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        root::root_check,
+        health::health_check,
+        available_tickers::api_get_available_tickers,
+        historical_data::api_get_historical_data,
+    ),
+    components(
+        schemas(
+            HealthResponse,
+            AvailableTickersResponse,
+            HistoricalDataResponse,
+        )
+    ),
+    tags(
+        (name = "General", description = "Root and health check endpoints"),
+        (name = "Tickers", description = "Listing of tickers (BYMA + commodities) cached by the collector"),
+        (name = "Historical Data", description = "Historical OHLCV candles fetched from Yahoo Finance and cached in Postgres")
+    ),
+    info(
+        title = "Data Collector API",
+        description = "Background-collector exposing cached BYMA tickers + Yahoo Finance historical data (including GOLD and OIL commodities).",
+        version = "0.1.0"
+    )
+)]
+pub struct ApiDoc;
+
 pub fn data_collector_router(dc_state: DCState) -> axum::Router {
+    let swagger =
+        SwaggerUi::new("/swagger").url("/swagger-endpoints.json", ApiDoc::openapi());
+
     axum::Router::new()
-        // Endpoint that returns the health status of the application, including the database connection
-        // In order to have access to UptimeRobot, we need to have a allowed HEAD method.
         .route(
             "/health",
-            get(HealthHandler::health_check).post(HealthHandler::health_check),
+            get(health::health_check).post(health::health_check),
         )
-        // Shows a message on the browser;
-        .route("/", get(RootHandler::root_check))
+        .route("/", get(root::root_check))
         .route(
             "/available-tickers",
-            post(AvailableTickers::api_get_available_tickers),
+            post(available_tickers::api_get_available_tickers),
         )
         .route(
             "/historical-data/{ticker}",
             post(historical_data::api_get_historical_data),
         )
         .with_state(dc_state)
+        .merge(swagger)
 }
