@@ -115,28 +115,29 @@ pub async fn fetch_historical_points() -> Result<Vec<PesoDolarPoint>, String> {
 	Ok(points)
 }
 
-pub async fn fetch_historical_and_persist(pool: PgPool) -> Result<Vec<PesoDolarPoint>, String> {
+pub async fn fetch_historical_and_persist(pool: PgPool) -> Result<(Vec<PesoDolarPoint>, bool), String> {
 	let points = fetch_historical_points().await?;
 
-	let batch_ts = Utc::now().timestamp_millis();
+    // Veo el timestamp de ayer ya que el valor de hoy no esta disponible aun
+	let batch_ts = Utc::today().pred_opt().unwrap().and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
     // Uso el oficial para ver si esta en el cache
 	let value_type = "oficial".to_string();
 
-	match peso_dolar_repository::is_cached(pool.clone(), value_type, batch_ts).await {
-		Ok(Some((_existing, _last_ts))) => {
-			// already cached for this batch_ts: nothing to do
-		}
+	let was_cached = match peso_dolar_repository::is_cached(pool.clone(), value_type.clone(), batch_ts).await {
+		Ok(Some((_existing, _last_ts))) => true,
 		Ok(None) => {
 			if !points.is_empty() {
 				if let Err(e) = peso_dolar_repository::update_cache(pool.clone(), value_type, batch_ts, points.clone()).await {
 					eprintln!("Failed to persist peso_dolar_cached: {}", e);
 				}
 			}
+			false
 		}
 		Err(e) => {
 			eprintln!("Failed to read peso_dolar_cached: {}", e);
+			false
 		}
-	}
+	};
 
-	Ok(points)
+	Ok((points, was_cached))
 }

@@ -5,6 +5,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::endpoints::{
     available_tickers::AvailableTickersResponse, health::HealthResponse,
     historical_data::HistoricalDataResponse, interest_rates::InterestRateResponse,
+    peso_dolar::{PesoDolarCurrentResponse, PesoDolarHistoricalResponse},
 };
 use yfinance_rs::YfClient;
 
@@ -12,6 +13,7 @@ pub mod available_tickers;
 pub mod health;
 pub mod historical_data;
 pub mod interest_rates;
+pub mod peso_dolar;
 pub mod root;
 
 #[derive(Clone)]
@@ -29,6 +31,8 @@ pub struct DCState {
         historical_data::api_get_historical_data,
         interest_rates::api_get_us_interest_rate,
         interest_rates::api_get_ar_interest_rate,
+        peso_dolar::api_get_current_rates,
+        peso_dolar::api_get_historical_rates,
     ),
     components(
         schemas(
@@ -36,6 +40,8 @@ pub struct DCState {
             AvailableTickersResponse,
             HistoricalDataResponse,
             InterestRateResponse,
+            PesoDolarCurrentResponse,
+            PesoDolarHistoricalResponse,
         )
     ),
     tags(
@@ -77,6 +83,14 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/interest-rate/ar/{series}",
             post(interest_rates::api_get_ar_interest_rate),
+        )
+        .route(
+            "/peso-dolar/current",
+            post(peso_dolar::api_get_current_rates),
+        )
+        .route(
+            "/peso-dolar/historical",
+            post(peso_dolar::api_get_historical_rates),
         )
         .with_state(dc_state)
         .merge(swagger)
