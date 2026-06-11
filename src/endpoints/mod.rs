@@ -4,7 +4,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::endpoints::{
     available_tickers::AvailableTickersResponse, health::HealthResponse,
-    historical_data::HistoricalDataResponse,
+    historical_data::HistoricalDataResponse, interest_rates::InterestRateResponse,
 };
 use yfinance_rs::YfClient;
 
@@ -27,18 +27,22 @@ pub struct DCState {
         health::health_check,
         available_tickers::api_get_available_tickers,
         historical_data::api_get_historical_data,
+        interest_rates::api_get_us_interest_rate,
+        interest_rates::api_get_ar_interest_rate,
     ),
     components(
         schemas(
             HealthResponse,
             AvailableTickersResponse,
             HistoricalDataResponse,
+            InterestRateResponse,
         )
     ),
     tags(
         (name = "General", description = "Root and health check endpoints"),
         (name = "Tickers", description = "Listing of tickers (BYMA + commodities) cached by the collector"),
-        (name = "Historical Data", description = "Historical OHLCV candles fetched from Yahoo Finance and cached in Postgres")
+        (name = "Historical Data", description = "Historical OHLCV candles fetched from Yahoo Finance and cached in Postgres. Use GOLD or OIL como ticker para commodities."),
+        (name = "Interest Rates", description = "Series de tasas de interés US (Yahoo) y AR (BCRA), cacheadas en Postgres")
     ),
     info(
         title = "Data Collector API",
