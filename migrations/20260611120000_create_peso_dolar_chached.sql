@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS peso_dolar_cached (
-    origin               VARCHAR(25) NOT NULL,
+    value_type               VARCHAR(25) NOT NULL,
     ts                   BIGINT NOT NULL,
     
     buy_price            NUMERIC NOT NULL,
