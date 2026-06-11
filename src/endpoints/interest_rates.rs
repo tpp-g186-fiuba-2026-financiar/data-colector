@@ -2,6 +2,8 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::endpoints::DCState;
 use crate::interest_rates::{ar_client, us_client};
@@ -9,6 +11,39 @@ use crate::persistence::interest_rate_repository::{self, InterestRatePoint};
 
 const CACHE_TTL_DAYS: i64 = 5;
 
+#[derive(Serialize, ToSchema)]
+pub struct InterestRateResponse {
+    /// HTTP status code
+    pub status: u16,
+    /// Origin of the series: `"US"` (Yahoo Finance) or `"AR"` (BCRA)
+    pub source: String,
+    /// Normalized series identifier (e.g. `TNX`, `TPM`, `BADLAR`)
+    pub series: String,
+    /// Vector of `{ source, series_id, ts, value }` points
+    #[schema(value_type = Vec<Object>)]
+    pub data: serde_json::Value,
+    /// `true` if served from cache, `false` if just fetched live
+    pub cached: bool,
+}
+
+#[utoipa::path(
+    post,
+    path = "/interest-rate/us/{series}",
+    params(
+        ("series" = String, Path, description = "US interest rate series: IRX, FVX, TNX, TYX (con o sin '^')")
+    ),
+    responses(
+        (status = 200, description = "Serie de tasas US (Yahoo Finance), cacheada 5 días", body = InterestRateResponse, example = json!({
+            "status": 200,
+            "source": "US",
+            "series": "TNX",
+            "data": [{ "source": "US", "series_id": "TNX", "ts": 1747008000000_i64, "value": "4.25" }],
+            "cached": true
+        })),
+        (status = 500, description = "Falla de Yahoo Finance o de la base", body = serde_json::Value)
+    ),
+    tag = "Interest Rates"
+)]
 pub async fn api_get_us_interest_rate(
     State(dc_state): State<DCState>,
     Path(series): Path<String>,
@@ -19,6 +54,24 @@ pub async fn api_get_us_interest_rate(
     .await
 }
 
+#[utoipa::path(
+    post,
+    path = "/interest-rate/ar/{series}",
+    params(
+        ("series" = String, Path, description = "AR interest rate series: TPM, BADLAR o variable_id numérico del BCRA")
+    ),
+    responses(
+        (status = 200, description = "Serie de tasas AR (BCRA), cacheada 5 días", body = InterestRateResponse, example = json!({
+            "status": 200,
+            "source": "AR",
+            "series": "TPM",
+            "data": [{ "source": "AR", "series_id": "TPM", "ts": 1747008000000_i64, "value": "40.00" }],
+            "cached": true
+        })),
+        (status = 500, description = "Falla del BCRA o de la base", body = serde_json::Value)
+    ),
+    tag = "Interest Rates"
+)]
 pub async fn api_get_ar_interest_rate(
     State(dc_state): State<DCState>,
     Path(series): Path<String>,
