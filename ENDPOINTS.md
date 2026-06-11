@@ -23,6 +23,8 @@ Una vez corriendo el servicio (por defecto en el puerto definido en `API_PORT`):
 | `GET` / `POST` | `/health` | General | [`health::health_check`](src/endpoints/health.rs) | Healthcheck con ping a Postgres |
 | `POST` | `/available-tickers` | Tickers | [`available_tickers::api_get_available_tickers`](src/endpoints/available_tickers.rs) | Devuelve todos los símbolos cacheados (BYMA + commodities GOLD/OIL) |
 | `POST` | `/historical-data/{ticker}` | Historical Data | [`historical_data::api_get_historical_data`](src/endpoints/historical_data.rs) | OHLCV histórico desde Yahoo Finance (cacheado 5 días) |
+| `POST` | `/interest-rate/us/{series}` | Interest Rates | [`interest_rates::api_get_us_interest_rate`](src/endpoints/interest_rates.rs) | Serie de tasas US desde Yahoo (IRX, FVX, TNX, TYX), cache 5 días |
+| `POST` | `/interest-rate/ar/{series}` | Interest Rates | [`interest_rates::api_get_ar_interest_rate`](src/endpoints/interest_rates.rs) | Serie de tasas AR desde BCRA (TPM, BADLAR, o variable_id num.), cache 5 días |
 
 ## Detalle por endpoint
 
@@ -70,6 +72,27 @@ Una vez corriendo el servicio (por defecto en el puerto definido en `API_PORT`):
 - **500:** Falla de Yahoo Finance o de la base.
 - Si el cache está vacío o tiene más de 5 días, dispara fetch a Yahoo Finance y
   persiste en `ticker_history_data_cached_yf` en background.
+
+### `POST /interest-rate/us/{series}`
+- **Param path** `series`: una de `IRX`, `FVX`, `TNX`, `TYX` (con o sin `^`).
+- **200:** Serie de tasas + flag `cached`.
+  ```json
+  {
+    "status": 200,
+    "source": "US",
+    "series": "TNX",
+    "data": [
+      { "source": "US", "series_id": "TNX", "ts": 1747008000000, "value": "4.25" }
+    ],
+    "cached": true
+  }
+  ```
+- **500:** Falla de Yahoo Finance o de la base.
+
+### `POST /interest-rate/ar/{series}`
+- **Param path** `series`: `TPM`, `BADLAR`, o cualquier `variable_id` numérico del BCRA.
+- **200:** Igual formato que el US pero `source = "AR"` y `series` normalizada en mayúsculas.
+- **500:** Falla del BCRA o de la base.
 
 ## Background jobs (no son endpoints HTTP)
 

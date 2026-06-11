@@ -11,6 +11,7 @@ use yfinance_rs::YfClient;
 pub mod available_tickers;
 pub mod health;
 pub mod historical_data;
+pub mod interest_rates;
 pub mod root;
 
 #[derive(Clone)]
@@ -64,6 +65,14 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/historical-data/{ticker}",
             post(historical_data::api_get_historical_data),
+        )
+        .route(
+            "/interest-rate/us/{series}",
+            post(interest_rates::api_get_us_interest_rate),
+        )
+        .route(
+            "/interest-rate/ar/{series}",
+            post(interest_rates::api_get_ar_interest_rate),
         )
         .with_state(dc_state)
         .merge(swagger)
