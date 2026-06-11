@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS peso_dolar_cached (
     buy_price            NUMERIC NOT NULL,
     sell_price           NUMERIC NOT NULL,
     
-    PRIMARY KEY (origin, ts),
+    PRIMARY KEY (value_type, ts),
 );
 
-CREATE INDEX IF NOT EXISTS idx_peso_dolar_cached_origin_ts 
-    ON peso_dolar_cached (origin, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_peso_dolar_cached_value_type_ts 
+    ON peso_dolar_cached (value_type, ts DESC);

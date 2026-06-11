@@ -5,7 +5,7 @@ use utoipa::ToSchema;
 
 use crate::endpoints::DCState;
 use crate::peso_dolar::peso_client;
-use crate::persistence::peso_dolar_repository::{self, PesoDolarPoint};
+use crate::persistence::peso_dolar_repository::{PesoDolarPoint};
 
 const HISTORICAL_VALUE_TYPE: &str = "oficial";
 
