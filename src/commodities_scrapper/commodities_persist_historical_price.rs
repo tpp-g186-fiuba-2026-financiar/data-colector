@@ -102,7 +102,8 @@ impl CommoditiesHistoricalPersistor {
                 let yfinance_ticker = Ticker::new(&*yfinance_client, yf_symbol.to_string());
 
                 let candles = match yfinance_ticker
-                    .history(Some(Range::Max), Some(yfinance_rs::Interval::D1), false)
+                    // Range::Max + D1 degrada a velas mensuales; Y10 fuerza diarias.
+                    .history(Some(Range::Y10), Some(yfinance_rs::Interval::D1), false)
                     .await
                 {
                     Ok(candles) => candles,

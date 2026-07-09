@@ -4,13 +4,16 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::endpoints::{
     available_tickers::AvailableTickersResponse, health::HealthResponse,
-    historical_data::HistoricalDataResponse, interest_rates::InterestRateResponse,
+    historical_data::HistoricalDataResponse,
+    historical_movement::{DailyPrice, MovementResponse},
+    interest_rates::InterestRateResponse,
 };
 use yfinance_rs::YfClient;
 
 pub mod available_tickers;
 pub mod health;
 pub mod historical_data;
+pub mod historical_movement;
 pub mod interest_rates;
 pub mod root;
 
@@ -27,6 +30,7 @@ pub struct DCState {
         health::health_check,
         available_tickers::api_get_available_tickers,
         historical_data::api_get_historical_data,
+        historical_movement::api_get_historical_movement,
         interest_rates::api_get_us_interest_rate,
         interest_rates::api_get_ar_interest_rate,
     ),
@@ -35,6 +39,8 @@ pub struct DCState {
             HealthResponse,
             AvailableTickersResponse,
             HistoricalDataResponse,
+            MovementResponse,
+            DailyPrice,
             InterestRateResponse,
         )
     ),
@@ -69,6 +75,10 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/historical-data/{ticker}",
             post(historical_data::api_get_historical_data),
+        )
+        .route(
+            "/historical-data/{ticker}/movement",
+            get(historical_movement::api_get_historical_movement),
         )
         .route(
             "/interest-rate/us/{series}",

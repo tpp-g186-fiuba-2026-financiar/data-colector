@@ -58,7 +58,10 @@ impl BymaTickerHistoricalDataPersistor {
 
             let yfinance_downloader = yfinance_rs::DownloadBuilder::new(&arc_yfinance_client)
                 .interval(yfinance_rs::Interval::D1)
-                .range(yfinance_rs::Range::Max)
+                // Range::Max + D1 hace que Yahoo degrade la granularidad a velas
+                // mensuales. Y10 fuerza data diaria (~2400 ruedas) que es lo que
+                // necesitan los modelos. Ver api-ml (modelo LSTM entrena con diarias).
+                .range(yfinance_rs::Range::Y10)
                 .symbols(
                     tickers
                         .iter()

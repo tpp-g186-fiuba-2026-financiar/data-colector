@@ -133,6 +133,24 @@ pub async fn is_historical_data_available(
     }
 }
 
+/// Historico de un ticker ordenado por fecha ascendente (mas viejo primero).
+/// A diferencia de `is_historical_data_available`, no trae el timestamp de
+/// ultima actualizacion: esto es para leer datos ya cacheados tal cual estan,
+/// no para decidir si hay que refrescarlos.
+pub async fn fetch_ordered_history(
+    pool: &PgPool,
+    ticker_symbol: &str,
+) -> Result<Vec<TickerHistoricalData>, sqlx::Error> {
+    sqlx::query_as(
+        r#"
+        SELECT * FROM ticker_history_data_cached_yf WHERE ticker = $1 ORDER BY ts ASC
+        "#,
+    )
+    .bind(ticker_symbol)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn update_historical_data(
     pool: PgPool,
     ticker_symbol: &str,
