@@ -202,3 +202,33 @@ pub async fn update_historical_data(
     tx.commit().await?;
     Ok(())
 }
+
+pub async fn remove_ticker_from_available_tickers(
+    pool: PgPool,
+    ticker_symbol: &str,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Delete the ticker from available_tickers_byma
+    sqlx::query(
+        r#"
+        DELETE FROM available_tickers_byma WHERE symbol = $1
+        "#,
+    )
+    .bind(ticker_symbol)
+    .execute(&mut *tx)
+    .await?;
+
+    // Delete the historical data for the ticker
+    sqlx::query(
+        r#"
+        DELETE FROM ticker_history_data_cached_yf WHERE ticker = $1
+        "#,
+    )
+    .bind(ticker_symbol)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
