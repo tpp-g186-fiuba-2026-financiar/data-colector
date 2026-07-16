@@ -25,7 +25,7 @@ impl BymaTickerHistoricalDataPersistor {
 
             let five_days_ago = chrono::Utc::now() - chrono::Duration::days(5);
             let query = format!(
-                "SELECT symbol FROM available_tickers_byma WHERE last_history_price_cached_at IS NULL OR last_history_price_cached_at < to_timestamp({}) ORDER BY market DESC LIMIT 5",
+                "SELECT symbol FROM available_tickers_byma WHERE market <> 'COMMODITY' AND (last_history_price_cached_at IS NULL OR last_history_price_cached_at < to_timestamp({})) ORDER BY market DESC LIMIT 8",
                 five_days_ago.timestamp()
             );
             let tickers: Vec<String> = match sqlx::query(&query).fetch_all(&*arc_pool).await {
@@ -61,6 +61,9 @@ impl BymaTickerHistoricalDataPersistor {
 
             let yfinance_downloader = yfinance_rs::DownloadBuilder::new(&arc_yfinance_client)
                 .interval(yfinance_rs::Interval::D1)
+                // Range::Max + D1 hace que Yahoo degrade la granularidad a velas
+                // mensuales. Y10 fuerza data diaria (~2400 ruedas) que es lo que
+                // necesitan los modelos. Ver api-ml (modelo LSTM entrena con diarias).
                 .range(yfinance_rs::Range::Y10)
                 .symbols(
                     tickers

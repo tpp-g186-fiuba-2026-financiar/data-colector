@@ -4,6 +4,7 @@ use data_collector::{
         byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
         byma_persist_tickers::BymaTickersPersistor,
     },
+    commodities_scrapper::commodities_persist_historical_price::CommoditiesHistoricalPersistor,
     endpoints::DCState,
     errors::project_errors::DataCollectorError,
 };
@@ -72,6 +73,10 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
     tokio::spawn(
         BymaTickerHistoricalDataPersistor::persist_historical_price_tickers(dc_state.clone()),
     );
+
+    tokio::spawn(CommoditiesHistoricalPersistor::persist_commodities_historical(
+        dc_state.clone(),
+    ));
 
     let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
 
