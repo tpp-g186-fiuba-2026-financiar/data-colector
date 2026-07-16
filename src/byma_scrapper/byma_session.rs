@@ -62,18 +62,18 @@ impl BymaScrapper {
         &self,
     ) -> Result<Vec<TickerQuote>, DataCollectorError<'static>> {
         let urls_data = vec![
-            (
+            /*(
                 "general-equity",
                 "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/general-equity",
-            ),
+            ),*/
             (
                 "leading-equity",
                 "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/leading-equity",
             ),
-            (
+            /*(
                 "cedears",
                 "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cedears",
-            ),
+            ),*/
         ];
 
         #[derive(Serialize, Deserialize, Debug)]

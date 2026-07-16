@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use rand::Rng;
+use regex::Regex;
 use sqlx::Row;
 
 use crate::endpoints::DCState;
@@ -12,6 +13,8 @@ impl BymaTickerHistoricalDataPersistor {
     pub async fn persist_historical_price_tickers(dc_state: DCState) {
         let pool = Arc::new(dc_state.sqlx_pool);
         let yfinance_client = Arc::new(dc_state.yf_client);
+
+        let re_expression_ticker = Regex::new(r"chart/(.+).BA\?").unwrap();
 
         loop {
             // Lets get the tickers from the database SORT by market and limited to 5.
@@ -66,6 +69,8 @@ impl BymaTickerHistoricalDataPersistor {
                         .collect::<Vec<String>>(),
                 );
 
+            // [Data-Collector-Historical-Task] Failed to download historical data from yfinance for tickers ["METRC", "GBAN", "BMA.C", "CVH", "LONG", "BYMAC", "LOMAC", "DOME"]: Not found at https://query1.finance.yahoo.com/v8/finance/chart/BMA.C.BA?range=10y&interval=1d&events=div%7Csplit%7CcapitalGains&includePrePost=false
+
             match yfinance_downloader.run().await {
                 Ok(data) => {
                     let entries = data.entries;
@@ -109,10 +114,55 @@ impl BymaTickerHistoricalDataPersistor {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[Data-Collector-Historical-Task] Failed to download historical data from yfinance for tickers {:?}: {}",
-                        tickers, e
-                    );
+                    let error_as_string = e.to_string();
+
+                    match re_expression_ticker.captures(&error_as_string) {
+                        Some(captures) => {
+                            if let Some(ticker_match) = captures.get(1) {
+                                let ticker = ticker_match.as_str();
+                                eprintln!(
+                                    "[Data-Collector-Historical-Task] Failed to download historical data from yfinance for ticker {}: {}",
+                                    ticker, e
+                                );
+
+                                // Lets remove this ticker now from the database
+                                match ticker_repository::remove_ticker_from_available_tickers(
+                                    (*pool).clone(),
+                                    ticker,
+                                )
+                                .await
+                                {
+                                    Ok(_) => eprintln!(
+                                        "[Data-Collector-Historical-Task] Successfully removed ticker {} from the main ticker list.",
+                                        ticker
+                                    ),
+                                    Err(err) => eprintln!(
+                                        "[Data-Collector-Historical-Task] Failed to remove ticker {} from the main ticker list: {}",
+                                        ticker, err
+                                    ),
+                                }
+                            } else {
+                                eprintln!(
+                                    "[Data-Collector-Historical-Task] Failed to download historical data from yfinance: {}",
+                                    e
+                                );
+                                eprintln!(
+                                    "[Data-Collector-Historical-Task] We also weren't able to remove the ticker from the main ticker list: {}",
+                                    error_as_string
+                                );
+                            }
+                        }
+                        None => {
+                            eprintln!(
+                                "[Data-Collector-Historical-Task] Failed to download historical data from yfinance: {}",
+                                e
+                            );
+                            eprintln!(
+                                "[Data-Collector-Historical-Task] We also weren't able to remove the ticker from the main ticker list: {}",
+                                error_as_string
+                            );
+                        }
+                    }
                 }
             }
 
