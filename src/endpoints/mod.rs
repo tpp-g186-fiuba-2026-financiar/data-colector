@@ -7,6 +7,7 @@ use crate::endpoints::{
     historical_data::HistoricalDataResponse,
     historical_movement::{DailyPrice, MovementResponse},
     interest_rates::InterestRateResponse,
+    peso_dolar::{PesoDolarCurrentResponse, PesoDolarHistoricalResponse},
 };
 use yfinance_rs::YfClient;
 
@@ -15,6 +16,7 @@ pub mod health;
 pub mod historical_data;
 pub mod historical_movement;
 pub mod interest_rates;
+pub mod peso_dolar;
 pub mod root;
 
 #[derive(Clone)]
@@ -33,6 +35,8 @@ pub struct DCState {
         historical_movement::api_get_historical_movement,
         interest_rates::api_get_us_interest_rate,
         interest_rates::api_get_ar_interest_rate,
+        peso_dolar::api_get_current_rates,
+        peso_dolar::api_get_historical_rates,
     ),
     components(
         schemas(
@@ -42,6 +46,8 @@ pub struct DCState {
             MovementResponse,
             DailyPrice,
             InterestRateResponse,
+            PesoDolarCurrentResponse,
+            PesoDolarHistoricalResponse,
         )
     ),
     tags(
@@ -87,6 +93,14 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/interest-rate/ar/{series}",
             post(interest_rates::api_get_ar_interest_rate),
+        )
+        .route(
+            "/peso-dolar/current",
+            post(peso_dolar::api_get_current_rates),
+        )
+        .route(
+            "/peso-dolar/historical",
+            post(peso_dolar::api_get_historical_rates),
         )
         .with_state(dc_state)
         .merge(swagger)

@@ -4,3 +4,4 @@ pub mod endpoints;
 pub mod errors;
 pub mod interest_rates;
 pub mod persistence;
+pub mod peso_dolar;
