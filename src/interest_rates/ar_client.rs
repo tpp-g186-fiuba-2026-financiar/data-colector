@@ -6,7 +6,7 @@ use crate::persistence::interest_rate_repository::InterestRatePoint;
 
 pub const SOURCE: &str = "AR";
 
-const BCRA_BASE_URL: &str = "https://api.bcra.gob.ar/estadisticas/v3.0/Monetarias";
+const BCRA_BASE_URL: &str = "https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias";
 
 #[derive(Debug, Deserialize)]
 struct BcraResponse {
@@ -21,7 +21,7 @@ struct BcraObservation {
 
 pub fn resolve_bcra_variable_id(series: &str) -> Option<u32> {
     match series.to_uppercase().as_str() {
-        "TPM" => Some(6),
+        "TPM" => Some(44),
         "BADLAR" => Some(7),
         _ => series.parse::<u32>().ok(),
     }
