@@ -38,6 +38,24 @@ impl BymaTickersPersistor {
                         ),
                         Err(e) => eprintln!("[Data Collector] Failed to persist quotes: {}", e),
                     }
+
+                    match ticker_repository::persist_bid_offers_historical(
+                        arc_sql_pool.clone(),
+                        &quotes,
+                    )
+                    .await
+                    {
+                        Ok((inserted, updated)) => println!(
+                            "[Data Collector] Persisted {} bid/offer historical rows | Updated {} rows ({} fetched)",
+                            inserted,
+                            updated,
+                            quotes.len()
+                        ),
+                        Err(e) => eprintln!(
+                            "[Data Collector] Failed to persist bid/offer historical data: {}",
+                            e
+                        ),
+                    }
                 }
                 Err(e) => {
                     let msg = format!("{}", e);
