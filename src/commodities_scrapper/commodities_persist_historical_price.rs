@@ -52,9 +52,7 @@ impl CommoditiesHistoricalPersistor {
                 five_days_ago.timestamp()
             );
 
-            let stale_symbols: Vec<String> = match sqlx::query(&stale_query)
-                .fetch_all(&*pool)
-                .await
+            let stale_symbols: Vec<String> = match sqlx::query(&stale_query).fetch_all(&*pool).await
             {
                 Ok(rows) => rows
                     .into_iter()
@@ -99,7 +97,7 @@ impl CommoditiesHistoricalPersistor {
                     clean_symbol, yf_symbol
                 );
 
-                let yfinance_ticker = Ticker::new(&*yfinance_client, yf_symbol.to_string());
+                let yfinance_ticker = Ticker::new(&yfinance_client, yf_symbol.to_string());
 
                 let candles = match yfinance_ticker
                     // Range::Max + D1 degrada a velas mensuales; Y10 fuerza diarias.

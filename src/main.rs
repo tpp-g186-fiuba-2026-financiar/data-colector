@@ -74,9 +74,7 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         BymaTickerHistoricalDataPersistor::persist_historical_price_tickers(dc_state.clone()),
     );
 
-    tokio::spawn(CommoditiesHistoricalPersistor::persist_commodities_historical(
-        dc_state.clone(),
-    ));
+    tokio::spawn(CommoditiesHistoricalPersistor::persist_commodities_historical(dc_state.clone()));
 
     let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
 

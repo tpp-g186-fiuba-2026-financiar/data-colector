@@ -3,7 +3,8 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::endpoints::{
-    available_tickers::AvailableTickersResponse, health::HealthResponse,
+    available_tickers::AvailableTickersResponse,
+    health::HealthResponse,
     historical_data::HistoricalDataResponse,
     historical_movement::{DailyPrice, MovementResponse},
     interest_rates::InterestRateResponse,
@@ -59,8 +60,7 @@ pub struct DCState {
 pub struct ApiDoc;
 
 pub fn data_collector_router(dc_state: DCState) -> axum::Router {
-    let swagger =
-        SwaggerUi::new("/swagger").url("/swagger-endpoints.json", ApiDoc::openapi());
+    let swagger = SwaggerUi::new("/swagger").url("/swagger-endpoints.json", ApiDoc::openapi());
 
     axum::Router::new()
         .route(
