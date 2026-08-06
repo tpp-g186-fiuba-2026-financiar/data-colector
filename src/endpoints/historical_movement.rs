@@ -109,8 +109,7 @@ pub async fn api_get_historical_movement(
         }
     };
 
-    let rows = match ticker_repository::fetch_ordered_history(&dc_state.sqlx_pool, &ticker).await
-    {
+    let rows = match ticker_repository::fetch_ordered_history(&dc_state.sqlx_pool, &ticker).await {
         Ok(rows) => rows,
         Err(e) => {
             eprintln!("Failed to fetch ordered history for {}: {}", ticker, e);
@@ -169,10 +168,7 @@ pub async fn api_get_historical_movement(
             StatusCode::UNPROCESSABLE_ENTITY,
             &format!(
                 "todavia no pasaron esas {} ruedas habiles desde {}; hay datos hasta {} ({} rueda(s) disponible(s) desde la base)",
-                query.days,
-                dated_rows[base_index].0,
-                last_date,
-                available
+                query.days, dated_rows[base_index].0, last_date, available
             ),
         );
     }

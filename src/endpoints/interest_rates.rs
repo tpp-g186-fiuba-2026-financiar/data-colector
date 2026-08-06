@@ -48,9 +48,12 @@ pub async fn api_get_us_interest_rate(
     State(dc_state): State<DCState>,
     Path(series): Path<String>,
 ) -> axum::Json<serde_json::Value> {
-    handle_request(dc_state.sqlx_pool, us_client::SOURCE, &series, |s| async move {
-        us_client::fetch_series(&s).await
-    })
+    handle_request(
+        dc_state.sqlx_pool,
+        us_client::SOURCE,
+        &series,
+        |s| async move { us_client::fetch_series(&s).await },
+    )
     .await
 }
 
@@ -76,9 +79,12 @@ pub async fn api_get_ar_interest_rate(
     State(dc_state): State<DCState>,
     Path(series): Path<String>,
 ) -> axum::Json<serde_json::Value> {
-    handle_request(dc_state.sqlx_pool, ar_client::SOURCE, &series, |s| async move {
-        ar_client::fetch_series(&s).await
-    })
+    handle_request(
+        dc_state.sqlx_pool,
+        ar_client::SOURCE,
+        &series,
+        |s| async move { ar_client::fetch_series(&s).await },
+    )
     .await
 }
 
@@ -139,13 +145,9 @@ where
         }
         None => match fetcher(series.to_string()).await {
             Ok(fresh) => {
-                if let Err(e) = interest_rate_repository::update_cache(
-                    pool,
-                    source,
-                    series,
-                    fresh.clone(),
-                )
-                .await
+                if let Err(e) =
+                    interest_rate_repository::update_cache(pool, source, series, fresh.clone())
+                        .await
                 {
                     eprintln!("Failed to persist interest_rate_cached: {}", e);
                 }
