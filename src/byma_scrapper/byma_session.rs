@@ -10,7 +10,7 @@ use crate::errors::project_errors::DataCollectorError;
 pub struct TickerQuote {
     pub symbol: String,
     pub market: String,
-    pub opening_price: f64,
+    pub offered_price: f64,
     pub bid_price: f64,
     pub recorded_at: DateTime<Utc>,
 }
@@ -168,7 +168,7 @@ impl BymaScrapper {
                             .map(|t| TickerQuote {
                                 symbol: t.symbol,
                                 market: market_string.clone(),
-                                opening_price: t.offered_price,
+                                offered_price: t.offered_price,
                                 bid_price: t.bid_price,
                                 recorded_at,
                             })

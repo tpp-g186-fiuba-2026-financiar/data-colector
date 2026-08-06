@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::byma_scrapper::byma_session::TickerQuote;
+use chrono::TimeZone;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -231,4 +232,47 @@ pub async fn remove_ticker_from_available_tickers(
 
     tx.commit().await?;
     Ok(())
+}
+
+pub async fn persist_bid_offers_historical(
+    pool: Arc<PgPool>,
+    quotes: &[TickerQuote],
+) -> Result<(u64, u64), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let mut inserted_count = 0;
+    let mut updated_count = 0;
+
+    // lets generate current time as only YYYY-MM-DD
+    let current_time = chrono::Utc::now().date_naive();
+    let current_time =
+        TimeZone::from_utc_datetime(&chrono::Utc, &current_time.and_hms_opt(0, 0, 0).unwrap());
+
+    for q in quotes {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO bid_offer_historical_prices (ticker, recorded_at, bid, offered)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ticker, recorded_at) DO UPDATE SET
+                bid = EXCLUDED.bid,
+                offered = EXCLUDED.offered
+            "#,
+        )
+        .bind(&q.symbol)
+        .bind(current_time)
+        .bind(q.bid_price)
+        .bind(q.offered_price)
+        .execute(&mut *tx)
+        .await?;
+
+        match result.rows_affected() {
+            1 => inserted_count += 1,
+            0 => updated_count += 1,
+            _ => {}
+        }
+    }
+
+    tx.commit().await?;
+
+    Ok((inserted_count, updated_count))
 }
