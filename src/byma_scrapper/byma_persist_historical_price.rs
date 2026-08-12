@@ -174,3 +174,21 @@ impl BymaTickerHistoricalDataPersistor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use regex::Regex;
+
+    #[test]
+    fn test_yfinance_error_ticker_extraction_regex() {
+        let re_expression_ticker = Regex::new(r"chart/(.+).BA\?").unwrap();
+
+        let error_message = "Failed to download historical data from yfinance for tickers: Not found at https://query1.finance.yahoo.com/v8/finance/chart/BMA.C.BA?range=10y&interval=1d";
+
+        let captures = re_expression_ticker.captures(error_message);
+        assert!(captures.is_some());
+
+        let ticker_match = captures.unwrap().get(1).map(|m| m.as_str());
+        assert_eq!(ticker_match, Some("BMA.C"));
+    }
+}
