@@ -210,3 +210,129 @@ fn error_response(status: StatusCode, message: &str) -> axum::Json<serde_json::V
         "message": { "error": message },
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::endpoints::DCState;
+    use axum::extract::{Path, Query, State};
+    use chrono::NaiveDate;
+    use sqlx::PgPool;
+    use yfinance_rs::YfClient;
+
+    async fn build_test_state(pool: PgPool) -> DCState {
+        DCState {
+            sqlx_pool: pool,
+            yf_client: YfClient::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .build().expect("Error generating YfClient for test state") ,
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_movement_success(pool: PgPool) {
+        let ticker = "GGAL";
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS available_tickers_byma (
+                id SERIAL PRIMARY KEY,
+                symbol TEXT NOT NULL UNIQUE,
+                market TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_history_price_cached_at TIMESTAMP WITH TIME ZONE
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ticker_history_data_cached_yf (
+                ticker VARCHAR(25) NOT NULL,
+                ts BIGINT NOT NULL,
+                volume BIGINT NOT NULL, 
+                open_amount NUMERIC NOT NULL,
+                high_amount NUMERIC NOT NULL,
+                low_amount NUMERIC NOT NULL,
+                close_amount NUMERIC NOT NULL,
+                close_unadj_amount NUMERIC NOT NULL,
+                PRIMARY KEY (ticker, ts)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO available_tickers_byma (symbol, market) VALUES ($1, 'leading-equity')",
+        )
+        .bind(ticker)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let sample_candles = vec![
+            (2026, 6, 25, 7650.0, 7720.0, 7580.0, 7605.0, 1200000_i64),
+            (2026, 6, 26, 7610.0, 7750.0, 7600.0, 7715.0, 980000_i64),
+            (2026, 6, 29, 7720.0, 7900.0, 7710.0, 7885.0, 1500000_i64),
+        ];
+
+        for (y, m, d, open, high, low, close, vol) in sample_candles {
+            let nd = NaiveDate::from_ymd_opt(y, m, d).unwrap();
+            let ts = nd
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis();
+
+            sqlx::query(
+                "INSERT INTO ticker_history_data_cached_yf (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+            )
+            .bind(ticker)
+            .bind(ts)
+            .bind(vol)
+            .bind(open)
+            .bind(high)
+            .bind(low)
+            .bind(close)
+            .bind(close)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let state = build_test_state(pool).await;
+        let path = Path(ticker.to_string());
+        let query = Query(MovementQuery {
+            from: "2026-06-25".to_string(),
+            days: 2,
+        });
+
+        let response = api_get_historical_movement(State(state), path, query).await;
+
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["ticker"], "GGAL");
+        assert_eq!(response.0["days"], 2);
+        assert_eq!(response.0["base_date"], "2026-06-25");
+        assert_eq!(response.0["target_date"], "2026-06-29");
+
+        let series = response.0["series"].as_array().unwrap();
+
+        assert_eq!(series.len(), 3);
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_movement_invalid_days(pool: PgPool) {
+        let state = build_test_state(pool).await;
+        let path = Path("GGAL".to_string());
+        let query = Query(MovementQuery {
+            from: "2026-06-25".to_string(),
+            days: 0,
+        });
+
+        let response = api_get_historical_movement(State(state), path, query).await;
+
+        assert_eq!(response.0["status"], 422);
+    }
+}

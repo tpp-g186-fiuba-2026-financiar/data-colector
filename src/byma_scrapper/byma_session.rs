@@ -223,3 +223,30 @@ impl BymaScrapper {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::byma_scrapper::byma_session::BymaScrapper;
+    use chrono::Timelike;
+    use tokio::runtime::Runtime;
+
+    fn is_byma_opendata_available() -> bool {
+        let now = chrono::Utc::now() - chrono::Duration::hours(3);
+        let hour = now.hour();
+        hour >= 10 && hour <= 18
+    }
+    #[test]
+    fn test_get_all_available_tickers() {
+        if !is_byma_opendata_available() {
+            eprintln!("BYMA open data is not available at this time. Skipping test.");
+            return;
+        }
+
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let scrapper = BymaScrapper::new().await.unwrap();
+            let tickers = scrapper.get_all_available_tickers().await.unwrap();
+            assert!(!tickers.is_empty());
+        });
+    }
+}

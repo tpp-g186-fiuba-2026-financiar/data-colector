@@ -178,3 +178,105 @@ async fn fetch_yf_history_helper(
 
     Ok(historical_data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{Path, State};
+    use sqlx::PgPool;
+
+    async fn build_test_dc_state(pool: PgPool) -> DCState {
+        let yf_client = YfClient::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        .build().expect("Error generating YfClient for test state");
+
+        DCState {
+            sqlx_pool: pool,
+            yf_client,
+        }
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_from_cache(pool: PgPool) {
+        let ticker_symbol = "GGAL";
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS available_tickers_byma (
+                id          SERIAL PRIMARY KEY,
+                symbol      TEXT NOT NULL UNIQUE,
+                market      TEXT NOT NULL,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_history_price_cached_at TIMESTAMP WITH TIME ZONE
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ticker_history_data_cached_yf (
+                ticker               VARCHAR(25) NOT NULL,
+                ts                   BIGINT NOT NULL,
+                volume               BIGINT NOT NULL, 
+                open_amount          NUMERIC NOT NULL,
+                high_amount          NUMERIC NOT NULL,
+                low_amount           NUMERIC NOT NULL,
+                close_amount         NUMERIC NOT NULL,
+                close_unadj_amount   NUMERIC NOT NULL,
+                PRIMARY KEY (ticker, ts),
+                CONSTRAINT fk_ticker
+                    FOREIGN KEY (ticker)
+                    REFERENCES available_tickers_byma (symbol)
+                    ON DELETE CASCADE
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO available_tickers_byma (symbol, market) VALUES ($1, 'leading-equity') ON CONFLICT (symbol) DO NOTHING"
+        )
+        .bind(ticker_symbol)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO ticker_history_data_cached_yf (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+        )
+        .bind(ticker_symbol)
+        .bind(1747008000000_i64)
+        .bind(12345_i64)
+        .bind(100.50_f64)
+        .bind(105.00_f64)
+        .bind(99.75_f64)
+        .bind(104.20_f64)
+        .bind(104.20_f64)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let now_timestamp = chrono::Utc::now().timestamp();
+        sqlx::query(
+            "UPDATE available_tickers_byma SET last_history_price_cached_at = TO_TIMESTAMP($1) WHERE symbol = $2"
+        )
+        .bind(now_timestamp)
+        .bind(ticker_symbol)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dc_state = build_test_dc_state(pool).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], true);
+
+        let data_array = response.0["data"].as_array().unwrap();
+        assert!(!data_array.is_empty());
+    }
+}
