@@ -29,6 +29,9 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      - name: Install Protoc (yfinance)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
