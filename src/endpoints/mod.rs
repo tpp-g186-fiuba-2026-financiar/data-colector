@@ -16,6 +16,7 @@ pub mod health;
 pub mod historical_data;
 pub mod historical_movement;
 pub mod interest_rates;
+pub mod model_ready_tickers;
 pub mod root;
 
 #[derive(Clone)]
@@ -71,6 +72,10 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/available-tickers",
             post(available_tickers::api_get_available_tickers),
+        )
+        .route(
+            "/model-ready-tickers",
+            post(model_ready_tickers::api_get_model_ready_tickers),
         )
         .route(
             "/historical-data/{ticker}",
