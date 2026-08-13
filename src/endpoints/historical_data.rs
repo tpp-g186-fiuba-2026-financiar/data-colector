@@ -9,6 +9,8 @@ use yfinance_rs::{Range, Ticker, YfClient};
 
 use crate::persistence::ticker_repository::{self, TickerHistoricalData};
 
+const MIN_MODEL_HISTORY_ROWS: usize = 100;
+
 #[derive(Serialize, ToSchema)]
 pub struct HistoricalDataResponse {
     /// HTTP status code returned by the endpoint
@@ -116,6 +118,20 @@ pub async fn api_get_historical_data(
                 Ok(historical_data) => {
                     let data: Vec<TickerHistoricalData> = historical_data.clone();
                     tokio::spawn(async move {
+                        if data.len() < MIN_MODEL_HISTORY_ROWS {
+                            eprintln!(
+                                "Not adding {} to model catalog: only {} historical rows",
+                                ticker,
+                                data.len()
+                            );
+                            return;
+                        }
+                        if let Err(error) =
+                            ticker_repository::ensure_available_ticker(&pool, &ticker).await
+                        {
+                            eprintln!("Failed to add ticker to available catalog: {}", error);
+                            return;
+                        }
                         let update_result =
                             ticker_repository::update_historical_data(pool, &ticker, data.clone())
                                 .await;

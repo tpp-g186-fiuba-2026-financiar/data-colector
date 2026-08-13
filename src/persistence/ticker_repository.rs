@@ -107,6 +107,22 @@ pub async fn persist_quotes(pool: Arc<PgPool>, quotes: &[TickerQuote]) -> Result
     Ok(rows.len() as u64)
 }
 
+/// Incorpora al catalogo un ticker descubierto por una consulta historica.
+/// Esto permite que los jobs de modelos lo encuentren en `/available-tickers`.
+pub async fn ensure_available_ticker(pool: &PgPool, symbol: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO available_tickers_byma (symbol, market)
+        VALUES ($1, 'ON_DEMAND')
+        ON CONFLICT (symbol) DO NOTHING
+        "#,
+    )
+    .bind(symbol)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// If there is historical data for the given ticker, returns an option.
 /// If there is no historical data for the given ticker, returns None.
 /// if there is historical data for the given ticker, returns a vector of TickerHistoricalData.
