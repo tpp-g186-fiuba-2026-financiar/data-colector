@@ -3,9 +3,12 @@ use data_collector::{
     commodities_scrapper::commodities_persist_historical_price::CommoditiesHistoricalPersistor,
     endpoints::DCState,
     errors::project_errors::DataCollectorError,
-    site_scrappers::byma_scrapper::{
-        byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
-        byma_persist_tickers::BymaTickersPersistor,
+    site_scrappers::{
+        byma_scrapper::{
+            byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
+            byma_persist_tickers::BymaTickersPersistor,
+        },
+        rava_scrapper::rava_scrapper_handler::RavaFetcher,
     },
 };
 use sqlx::postgres::PgPoolOptions;
