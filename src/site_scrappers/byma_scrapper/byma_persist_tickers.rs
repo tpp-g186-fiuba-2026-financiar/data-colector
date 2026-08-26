@@ -3,8 +3,8 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::{
-    byma_scrapper::byma_session::BymaScrapper, errors::project_errors::DataCollectorError,
-    persistence::ticker_repository,
+    errors::project_errors::DataCollectorError, persistence::ticker_repository,
+    site_scrappers::byma_scrapper::byma_session::BymaScrapper,
 };
 
 pub struct BymaTickersPersistor;

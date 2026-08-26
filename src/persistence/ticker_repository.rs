@@ -1,11 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::byma_scrapper::byma_session::TickerQuote;
 use chrono::TimeZone;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use yfinance_rs::Candle;
+
+use crate::site_scrappers::byma_scrapper::byma_session::TickerQuote;
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct TickerHistoricalData {
