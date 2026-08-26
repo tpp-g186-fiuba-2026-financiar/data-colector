@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use yfinance_rs::Candle;
 
-use crate::site_scrappers::byma_scrapper::byma_session::TickerQuote;
+use crate::site_scrappers::{
+    byma_scrapper::byma_session::TickerQuote,
+    rava_scrapper::rava_scrapper_handler::ItemDescriptionData,
+};
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct TickerHistoricalData {
@@ -292,4 +295,35 @@ pub async fn persist_bid_offers_historical(
     tx.commit().await?;
 
     Ok((inserted_count, updated_count))
+}
+
+pub async fn persist_rava_tickers(
+    pool: Arc<PgPool>,
+    merval_reference_data_tickers: &HashMap<String, ItemDescriptionData>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // lets save in a single table the <ticker, short_name, long_name, description> from merval_reference_data_tickers
+    for (ticker, item_data) in merval_reference_data_tickers {
+        sqlx::query(
+            r#"
+            INSERT INTO rava_tickers (ticker, short_name, long_name, description)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ticker) DO UPDATE SET
+                short_name = EXCLUDED.short_name,
+                long_name = EXCLUDED.long_name,
+                description = EXCLUDED.description
+            "#,
+        )
+        .bind(ticker)
+        .bind(&item_data.nombre_corto)
+        .bind(&item_data.nombre_largo)
+        .bind(&item_data.descripcion)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
 }
