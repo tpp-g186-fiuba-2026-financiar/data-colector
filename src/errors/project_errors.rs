@@ -13,6 +13,7 @@ pub enum DataCollectorError<'a> {
     PersistenceError(sqlx::Error),
     MigrationError(sqlx::migrate::MigrateError),
     YFinanceClientError(yfinance_rs::YfError),
+    RavaScrapperError(&'a str),
 }
 
 impl std::fmt::Display for DataCollectorError<'_> {
@@ -81,6 +82,9 @@ impl std::fmt::Display for DataCollectorError<'_> {
             }
             DataCollectorError::YFinanceClientError(err) => {
                 write!(f, "{}: YFinance client error: {}", prefix, err)
+            }
+            DataCollectorError::RavaScrapperError(err) => {
+                write!(f, "{}: Rava scrapper error: {}", prefix, err)
             }
         }
     }
