@@ -55,6 +55,8 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         scraper_pool.clone(),
     ));
 
+    tokio::spawn(RavaFetcher::fetch_rava_tickers(scraper_pool.clone()));
+
     let yfinance_client = match YfClient::builder()
     .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     .build()
