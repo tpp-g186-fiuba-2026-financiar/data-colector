@@ -178,7 +178,7 @@ impl RavaFetcher {
                         ));
                     }
                 };
-                
+
                 let text = match response.text().await {
                     Ok(text) => text,
                     Err(e) => {
@@ -196,7 +196,11 @@ impl RavaFetcher {
                     Err(e) => {
                         let error_message =
                             format!("Failed to parse historical prices for {}: {:?}", ticker, e);
-                        eprintln!("[Data Collector] {} {:?}", error_message, &text[..std::cmp::min(text.len(), 200)]);
+                        eprintln!(
+                            "[Data Collector] {} {:?}",
+                            error_message,
+                            &text[..std::cmp::min(text.len(), 200)]
+                        );
                         return Err(DataCollectorError::RavaScrapperError(
                             "Failed to parse historical prices for ticker",
                         ));

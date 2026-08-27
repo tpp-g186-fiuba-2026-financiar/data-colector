@@ -25,9 +25,31 @@ pub struct ItemDescriptionData {
     pub nombre_corto: String,
     #[serde(rename = "nl")]
     pub nombre_largo: String,
-    #[serde(rename = "desc", default)]
+    #[serde(rename = "desc", deserialize_with = "description_deserialize")]
     // it can be nul so we use Option
     pub descripcion: Option<String>,
+}
+
+fn description_deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<String> = Option::deserialize(deserializer)?;
+
+    // Lets remove the \n \r from the string if it is not None
+    if value.is_none() {
+        return Ok(None);
+    }
+
+    let value = value.unwrap();
+    let value = value
+        .replace("\n", "")
+        .replace("\r", "")
+        .replace("\t", "")
+        .trim()
+        .to_string();
+
+    Ok(Some(value))
 }
 
 #[derive(Deserialize, Debug, Clone)]
