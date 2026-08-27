@@ -1,38 +1,17 @@
 use std::{collections::HashMap, sync::Arc};
 
-use serde::Deserialize;
 use sqlx::PgPool;
+use tokio::task::JoinHandle;
 
-use crate::{errors::project_errors::DataCollectorError, persistence::ticker_repository};
+use crate::{
+    errors::project_errors::DataCollectorError,
+    persistence::ticker_repository,
+    site_scrappers::rava_scrapper::rava_structures_responses::{
+        ItemData, ItemDescriptionData, PriceData, RavaClasificacionResponse,
+        RavaHistoricalResponse, RavaRefDataResponse,
+    },
+};
 pub struct RavaFetcher;
-
-#[derive(Deserialize, Debug)]
-struct RavaClasificacionResponse {
-    datos: HashMap<String, ItemData>,
-}
-
-#[derive(Deserialize, Debug)]
-struct RavaRefDataResponse {
-    datos: HashMap<String, ItemDescriptionData>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ItemData {
-    pub st: String,
-    pub sst: String,
-    pub text: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct ItemDescriptionData {
-    #[serde(rename = "nc")]
-    pub nombre_corto: String,
-    #[serde(rename = "nl")]
-    pub nombre_largo: String,
-    #[serde(rename = "desc", default)]
-    // it can be nul so we use Option
-    pub descripcion: Option<String>,
-}
 
 impl RavaFetcher {
     pub async fn fetch_rava_tickers(sqlx_pool: PgPool) -> Result<(), DataCollectorError<'static>> {
@@ -92,10 +71,38 @@ impl RavaFetcher {
             );
             println!(
                 "[Data Collector] Fetched and persisted Rava tickers: {:?}",
-                merval_reference_data_tickers_hash.keys()
+                merval_reference_data_tickers_hash
             );
 
-            // Sleep for 10 hours, we don't need to fetch this data too often, and the API is rate limited.
+            let historical_prices =
+                match Self::fetch_historical_prices_for_rava_tickers(&merval_tickers).await {
+                    Ok(prices) => prices,
+                    Err(e) => {
+                        eprintln!(
+                            "[Data Collector] Failed to fetch historical prices: {:?}",
+                            e
+                        );
+                        return Err(DataCollectorError::RavaScrapperError(
+                            "Failed to fetch historical prices for Rava tickers",
+                        ));
+                    }
+                };
+
+            match ticker_repository::persist_rava_historical_prices(
+                arc_sql_pool.clone(),
+                &historical_prices,
+            )
+            .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!(
+                        "[Data Collector] Failed to persist historical prices: {:?}",
+                        e
+                    );
+                }
+            }
+
             let sleep_for_1_min = tokio::time::Duration::from_secs(60);
             tokio::time::sleep(sleep_for_1_min).await;
             //tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60 * 10)).await;
@@ -136,5 +143,76 @@ impl RavaFetcher {
         Err(DataCollectorError::RavaScrapperError(
             "Failed to fetch Rava reference data tickers",
         ))
+    }
+
+    async fn fetch_historical_prices_for_rava_tickers(
+        tickers: &[String],
+    ) -> Result<HashMap<String, Vec<PriceData>>, DataCollectorError<'static>> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+
+        type JoinHandleRavaHistoricalPrices =
+            Result<HashMap<String, Vec<PriceData>>, DataCollectorError<'static>>;
+
+        let mut handles: Vec<JoinHandle<JoinHandleRavaHistoricalPrices>> = Vec::new();
+
+        let client = reqwest::Client::new();
+
+        for ticker in tickers {
+            let ticker = ticker.clone();
+            let semaphore_clone = semaphore.clone();
+            let client = client.clone();
+
+            let handle = tokio::spawn(async move {
+                let url =
+                    "https://mercado.rava.com/api/prices/historico/arg/{}".replace("{}", &ticker);
+                let _permit = semaphore_clone.acquire().await.unwrap();
+
+                let response = match client.get(&url).send().await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        let error_message =
+                            format!("Failed to fetch historical prices for {}: {:?}", ticker, e);
+                        eprintln!("[Data Collector] {}", error_message);
+                        return Err(DataCollectorError::RavaScrapperError(
+                            "Failed to fetch historical prices for ticker",
+                        ));
+                    }
+                };
+
+                if let Ok(data) = response.json::<RavaHistoricalResponse>().await {
+                    let mut result = HashMap::new();
+                    result.insert(data.simbolo, data.datos);
+                    Ok(result)
+                } else {
+                    eprintln!(
+                        "[Data Collector] Failed to parse historical prices for {}",
+                        ticker
+                    );
+                    Err(DataCollectorError::RavaScrapperError(
+                        "Failed to parse historical prices for ticker",
+                    ))
+                }
+            });
+            handles.push(handle);
+        }
+
+        let mut output_hashmap: HashMap<String, Vec<PriceData>> = HashMap::new();
+
+        for handle in handles {
+            if let Ok(Ok(ticker_prices)) = handle.await {
+                for (ticker, prices) in ticker_prices.clone() {
+                    output_hashmap.insert(ticker.clone(), prices.clone());
+                    println!(
+                        "[Data Collector] Rava Ticker {} found {} historical prices",
+                        ticker,
+                        prices.len()
+                    );
+                }
+            } else {
+                eprintln!("[Data Collector] Failed to fetch historical prices for a ticker");
+            }
+        }
+
+        Ok(output_hashmap)
     }
 }
