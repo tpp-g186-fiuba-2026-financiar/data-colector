@@ -178,13 +178,25 @@ impl RavaFetcher {
                         ));
                     }
                 };
+                
+                let text = match response.text().await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        let error_message =
+                            format!("Failed to read response text for {}: {:?}", ticker, e);
+                        eprintln!("[Data Collector] {}", error_message);
+                        return Err(DataCollectorError::RavaScrapperError(
+                            "Failed to read response text for ticker",
+                        ));
+                    }
+                };
 
-                let response_json = match response.json::<RavaHistoricalResponse>().await {
+                let response_json: RavaHistoricalResponse = match serde_json::from_str(&text) {
                     Ok(data) => data,
                     Err(e) => {
                         let error_message =
                             format!("Failed to parse historical prices for {}: {:?}", ticker, e);
-                        eprintln!("[Data Collector] {}", error_message);
+                        eprintln!("[Data Collector] {} {:?}", error_message, &text[..std::cmp::min(text.len(), 200)]);
                         return Err(DataCollectorError::RavaScrapperError(
                             "Failed to parse historical prices for ticker",
                         ));
