@@ -69,7 +69,7 @@ pub struct PriceData {
     #[serde(default)]
     pub apertura: f64,
     #[serde(default)]
-    pub volumen: i64,
+    pub volumen: f64,
 
     #[serde(deserialize_with = "date_only")]
     pub fecha: String,
