@@ -161,8 +161,8 @@ impl RavaFetcher {
             let client = client.clone();
 
             let handle = tokio::spawn(async move {
-                let url =
-                    "https://mercado.rava.com/api/prices/historico/arg/{}".replace("{}", &ticker);
+                let url = "https://mercado.rava.com/api/prices/historico/arg/{}?dias=4435"
+                    .replace("{}", &ticker);
                 let _permit = semaphore_clone.acquire().await.unwrap();
 
                 let response = match client.get(&url).send().await {
