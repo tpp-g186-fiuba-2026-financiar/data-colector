@@ -226,9 +226,10 @@ impl BymaScrapper {
 
 #[cfg(test)]
 mod test {
-    use crate::byma_scrapper::byma_session::BymaScrapper;
     use chrono::Timelike;
     use tokio::runtime::Runtime;
+
+    use crate::site_scrappers::byma_scrapper::byma_session::BymaScrapper;
 
     fn is_byma_opendata_available() -> bool {
         let now = chrono::Utc::now() - chrono::Duration::hours(3);

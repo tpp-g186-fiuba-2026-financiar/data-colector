@@ -1,11 +1,15 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::byma_scrapper::byma_session::TickerQuote;
 use chrono::TimeZone;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use yfinance_rs::Candle;
+
+use crate::site_scrappers::{
+    byma_scrapper::byma_session::TickerQuote,
+    rava_scrapper::rava_structures_responses::{ItemDescriptionData, PriceData},
+};
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
 pub struct TickerHistoricalData {
@@ -23,7 +27,6 @@ impl TickerHistoricalData {
     pub fn from_candle(candle: &Candle, ticker: &str) -> Self {
         let volume_int = candle.volume.unwrap_or(0) as i64;
 
-        // Try calling .amount() as a method instead of a field
         let unadj_price = match &candle.close_unadj {
             Some(price) => price.amount(),
             None => candle.close.amount(),
@@ -291,4 +294,85 @@ pub async fn persist_bid_offers_historical(
     tx.commit().await?;
 
     Ok((inserted_count, updated_count))
+}
+
+pub async fn persist_rava_tickers(
+    pool: Arc<PgPool>,
+    merval_reference_data_tickers: &HashMap<String, ItemDescriptionData>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    for (ticker, item_data) in merval_reference_data_tickers {
+        sqlx::query(
+            r#"
+            INSERT INTO rava_tickers (ticker, short_name, long_name, description)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (ticker) DO UPDATE SET
+                short_name = EXCLUDED.short_name,
+                long_name = EXCLUDED.long_name,
+                description = EXCLUDED.description
+            "#,
+        )
+        .bind(ticker)
+        .bind(&item_data.nombre_corto)
+        .bind(&item_data.nombre_largo)
+        .bind(&item_data.descripcion)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn persist_rava_historical_prices(
+    pool: Arc<PgPool>,
+    historical_prices: &HashMap<String, Vec<PriceData>>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    /* CREATE TABLE ticker_history (
+    simbolo VARCHAR(50),
+    fecha DATE,
+    precio NUMERIC(10, 4),
+    maximo NUMERIC(10, 4),
+    minimo NUMERIC(10, 4),
+    apertura NUMERIC(10, 4),
+    volumen BIGINT,
+    timestamp BIGINT,
+    PRIMARY KEY (simbolo, fecha)
+    ); */
+
+    for (ticker, prices) in historical_prices {
+        for price_data in prices {
+            sqlx::query(
+                r#"
+                INSERT INTO rava_ticker_history (ticker, fecha, precio, maximo, minimo, apertura, volumen, timestamp)
+                VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (ticker, fecha) DO UPDATE SET
+                    precio = EXCLUDED.precio,
+                    maximo = EXCLUDED.maximo,
+                    minimo = EXCLUDED.minimo,
+                    apertura = EXCLUDED.apertura,
+                    volumen = EXCLUDED.volumen,
+                    timestamp = EXCLUDED.timestamp
+                "#,
+            )
+            .bind(ticker)
+            .bind(price_data.fecha.clone())
+            .bind(price_data.precio)
+            .bind(price_data.maximo)
+            .bind(price_data.minimo)
+            .bind(price_data.apertura)
+            .bind(price_data.volumen)
+            .bind(price_data.timestamp)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+
+    Ok(())
 }
