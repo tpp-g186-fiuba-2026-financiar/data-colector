@@ -7,5 +7,5 @@ CREATE TABLE rava_ticker_history (
     apertura NUMERIC(10, 4),
     volumen BIGINT,
     timestamp BIGINT,
-    PRIMARY KEY (simbolo, fecha)
+    PRIMARY KEY (ticker, fecha)
 );

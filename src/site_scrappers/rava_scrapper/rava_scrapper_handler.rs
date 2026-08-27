@@ -103,9 +103,7 @@ impl RavaFetcher {
                 }
             }
 
-            let sleep_for_1_min = tokio::time::Duration::from_secs(60);
-            tokio::time::sleep(sleep_for_1_min).await;
-            //tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60 * 10)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(60 * 60 * 10)).await;
         }
     }
 

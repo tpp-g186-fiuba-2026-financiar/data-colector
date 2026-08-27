@@ -348,7 +348,7 @@ pub async fn persist_rava_historical_prices(
         for price_data in prices {
             sqlx::query(
                 r#"
-                INSERT INTO rava_historical_prices (ticker, fecha, precio, maximo, minimo, apertura, volumen, timestamp)
+                INSERT INTO rava_ticker_history (ticker, fecha, precio, maximo, minimo, apertura, volumen, timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (ticker, fecha) DO UPDATE SET
                     precio = EXCLUDED.precio,
