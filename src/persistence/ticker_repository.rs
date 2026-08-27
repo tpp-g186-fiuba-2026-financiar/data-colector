@@ -8,7 +8,7 @@ use yfinance_rs::Candle;
 
 use crate::site_scrappers::{
     byma_scrapper::byma_session::TickerQuote,
-    rava_scrapper::rava_scrapper_handler::ItemDescriptionData,
+    rava_scrapper::rava_structures_responses::{ItemDescriptionData, PriceData},
 };
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow, Clone)]
@@ -27,7 +27,6 @@ impl TickerHistoricalData {
     pub fn from_candle(candle: &Candle, ticker: &str) -> Self {
         let volume_int = candle.volume.unwrap_or(0) as i64;
 
-        // Try calling .amount() as a method instead of a field
         let unadj_price = match &candle.close_unadj {
             Some(price) => price.amount(),
             None => candle.close.amount(),
@@ -303,8 +302,7 @@ pub async fn persist_rava_tickers(
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    // lets save in a single table the <ticker, short_name, long_name, description> from merval_reference_data_tickers
-    for (ticker, item_data) in merval_reference_data_tickers {
+   for (ticker, item_data) in merval_reference_data_tickers {
         sqlx::query(
             r#"
             INSERT INTO rava_tickers (ticker, short_name, long_name, description)
@@ -321,6 +319,57 @@ pub async fn persist_rava_tickers(
         .bind(&item_data.descripcion)
         .execute(&mut *tx)
         .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn persist_rava_historical_prices(
+    pool: Arc<PgPool>,
+    historical_prices: &HashMap<String, Vec<PriceData>>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    /* CREATE TABLE ticker_history (
+    simbolo VARCHAR(50),
+    fecha DATE,
+    precio NUMERIC(10, 4),
+    maximo NUMERIC(10, 4),
+    minimo NUMERIC(10, 4),
+    apertura NUMERIC(10, 4),
+    volumen BIGINT,
+    timestamp BIGINT,
+    PRIMARY KEY (simbolo, fecha)
+    ); */
+
+    for (ticker, prices) in historical_prices {
+        for price_data in prices {
+            sqlx::query(
+                r#"
+                INSERT INTO rava_historical_prices (ticker, fecha, precio, maximo, minimo, apertura, volumen, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (ticker, fecha) DO UPDATE SET
+                    precio = EXCLUDED.precio,
+                    maximo = EXCLUDED.maximo,
+                    minimo = EXCLUDED.minimo,
+                    apertura = EXCLUDED.apertura,
+                    volumen = EXCLUDED.volumen,
+                    timestamp = EXCLUDED.timestamp
+                "#,
+            )
+            .bind(ticker)
+            .bind(price_data.fecha.clone())
+            .bind(price_data.precio)
+            .bind(price_data.maximo)
+            .bind(price_data.minimo)
+            .bind(price_data.apertura)
+            .bind(price_data.volumen)
+            .bind(price_data.timestamp)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
 
     tx.commit().await?;
