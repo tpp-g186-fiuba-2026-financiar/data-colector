@@ -60,10 +60,15 @@ pub struct RavaHistoricalResponse {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PriceData {
+    #[serde(default)]
     pub precio: f64,
+    #[serde(default)]
     pub maximo: f64,
+    #[serde(default)]
     pub minimo: f64,
+    #[serde(default)]
     pub apertura: f64,
+    #[serde(default)]
     pub volumen: i64,
 
     #[serde(deserialize_with = "date_only")]
