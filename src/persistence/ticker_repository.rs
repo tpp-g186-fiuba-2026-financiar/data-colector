@@ -302,7 +302,7 @@ pub async fn persist_rava_tickers(
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-   for (ticker, item_data) in merval_reference_data_tickers {
+    for (ticker, item_data) in merval_reference_data_tickers {
         sqlx::query(
             r#"
             INSERT INTO rava_tickers (ticker, short_name, long_name, description)

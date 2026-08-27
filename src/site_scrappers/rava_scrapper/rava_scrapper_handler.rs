@@ -179,19 +179,21 @@ impl RavaFetcher {
                     }
                 };
 
-                if let Ok(data) = response.json::<RavaHistoricalResponse>().await {
-                    let mut result = HashMap::new();
-                    result.insert(data.simbolo, data.datos);
-                    Ok(result)
-                } else {
-                    eprintln!(
-                        "[Data Collector] Failed to parse historical prices for {}",
-                        ticker
-                    );
-                    Err(DataCollectorError::RavaScrapperError(
-                        "Failed to parse historical prices for ticker",
-                    ))
-                }
+                let response_json = match response.json::<RavaHistoricalResponse>().await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        let error_message =
+                            format!("Failed to parse historical prices for {}: {:?}", ticker, e);
+                        eprintln!("[Data Collector] {}", error_message);
+                        return Err(DataCollectorError::RavaScrapperError(
+                            "Failed to parse historical prices for ticker",
+                        ));
+                    }
+                };
+
+                let mut result = HashMap::new();
+                result.insert(response_json.simbolo, response_json.datos);
+                Ok(result)
             });
             handles.push(handle);
         }
