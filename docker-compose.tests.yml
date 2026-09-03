@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: test_data_collector
+      POSTGRES_PASSWORD: test_data_collector_password
+      POSTGRES_DB: test_db_dc
+    ports:
+      - "5432:5432"
+
+
+  test-runner:
+    image: rust:latest
+    working_dir: /app
+    volumes:
+      - .:/app
+
+    environment:
+      DATABASE_URL: postgres://test_data_collector:test_data_collector_password@postgres:5432/test_db_dc
+    depends_on:
+      - postgres
+    command: >
+      bash -c "
+      apt-get update &&
+      apt-get install -y protobuf-compiler &&
+      sleep 100 &&
+      export DATABASE_URL=postgres://test_data_collector:test_data_collector_password@postgres:5432/test_db_dc &&
+      cargo test
+      "

@@ -18,3 +18,4 @@ rand = "0.8"
 utoipa = { version = "5.5.0", features = ["chrono"] }
 utoipa-swagger-ui = { version = "9.0.0", features = ["axum"] }
 regex = "1.13.0"
+wiremock = "0.6.5"
