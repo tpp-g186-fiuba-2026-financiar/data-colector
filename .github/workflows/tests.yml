@@ -38,8 +38,12 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --no-default-features --features rustls,postgres
+
       - name: Run Project Tests
         env:
-          # 2. Point SQLx strictly to the disposable database running on the runner's localhost
           DATABASE_URL: postgres://test_data_collector_user:test_data_collector_password@localhost:5432/test_db_dc
-        run: cargo test --verbose
+        run: |
+          cargo sqlx migrate run
+          cargo test
