@@ -13,14 +13,16 @@ use crate::{
 };
 pub struct RavaFetcher;
 
+const BASE_RAVA_URL: &str = "https://mercado.rava.com";
+
 impl RavaFetcher {
     pub async fn fetch_rava_tickers(sqlx_pool: PgPool) -> Result<(), DataCollectorError<'static>> {
         let arc_sql_pool = Arc::new(sqlx_pool);
 
         loop {
             let (classification_tickers, ref_data_tickers) = tokio::join!(
-                RavaFetcher::get_rava_classification_tickers(),
-                RavaFetcher::get_rava_ref_data_tickers()
+                RavaFetcher::get_rava_classification_tickers(BASE_RAVA_URL),
+                RavaFetcher::get_rava_ref_data_tickers(BASE_RAVA_URL)
             );
 
             if classification_tickers.is_err() || ref_data_tickers.is_err() {
@@ -74,19 +76,23 @@ impl RavaFetcher {
                 merval_reference_data_tickers_hash
             );
 
-            let historical_prices =
-                match Self::fetch_historical_prices_for_rava_tickers(&merval_tickers).await {
-                    Ok(prices) => prices,
-                    Err(e) => {
-                        eprintln!(
-                            "[Data Collector] Failed to fetch historical prices: {:?}",
-                            e
-                        );
-                        return Err(DataCollectorError::RavaScrapperError(
-                            "Failed to fetch historical prices for Rava tickers",
-                        ));
-                    }
-                };
+            let historical_prices = match Self::fetch_historical_prices_for_rava_tickers(
+                BASE_RAVA_URL,
+                &merval_tickers,
+            )
+            .await
+            {
+                Ok(prices) => prices,
+                Err(e) => {
+                    eprintln!(
+                        "[Data Collector] Failed to fetch historical prices: {:?}",
+                        e
+                    );
+                    return Err(DataCollectorError::RavaScrapperError(
+                        "Failed to fetch historical prices for Rava tickers",
+                    ));
+                }
+            };
 
             match ticker_repository::persist_rava_historical_prices(
                 arc_sql_pool.clone(),
@@ -107,10 +113,11 @@ impl RavaFetcher {
         }
     }
 
-    pub async fn get_rava_classification_tickers()
-    -> Result<HashMap<String, ItemData>, DataCollectorError<'static>> {
+    pub async fn get_rava_classification_tickers(
+        site_domain: &str,
+    ) -> Result<HashMap<String, ItemData>, DataCollectorError<'static>> {
         let classification_request = reqwest::Client::new()
-            .get("https://mercado.rava.com/api/prices/clasificacion")
+            .get(format!("{}/api/prices/clasificacion", site_domain))
             .send()
             .await;
 
@@ -125,10 +132,11 @@ impl RavaFetcher {
         ))
     }
 
-    pub async fn get_rava_ref_data_tickers()
-    -> Result<HashMap<String, ItemDescriptionData>, DataCollectorError<'static>> {
+    pub async fn get_rava_ref_data_tickers(
+        site_domain: &str,
+    ) -> Result<HashMap<String, ItemDescriptionData>, DataCollectorError<'static>> {
         let ref_data_request = reqwest::Client::new()
-            .get("https://mercado.rava.com/api/prices/refdata")
+            .get(format!("{}/api/prices/refdata", site_domain))
             .send()
             .await;
 
@@ -144,6 +152,7 @@ impl RavaFetcher {
     }
 
     async fn fetch_historical_prices_for_rava_tickers(
+        site_domain: &str,
         tickers: &[String],
     ) -> Result<HashMap<String, Vec<PriceData>>, DataCollectorError<'static>> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
@@ -159,10 +168,12 @@ impl RavaFetcher {
             let ticker = ticker.clone();
             let semaphore_clone = semaphore.clone();
             let client = client.clone();
-
+            let site_domain = site_domain.to_string();
             let handle = tokio::spawn(async move {
-                let url = "https://mercado.rava.com/api/prices/historico/arg/{}?dias=4435"
-                    .replace("{}", &ticker);
+                let url = format!(
+                    "{}/api/prices/historico/arg/{}?dias=4435",
+                    site_domain, ticker
+                );
                 let _permit = semaphore_clone.acquire().await.unwrap();
 
                 let response = match client.get(&url).send().await {
@@ -230,5 +241,109 @@ impl RavaFetcher {
         }
 
         Ok(output_hashmap)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    use crate::site_scrappers::rava_scrapper::{
+        MOCK_BYMA_HISTORICAL_JSON, MOCK_REFDATA_JSON, rava_scrapper_handler::RavaFetcher,
+    };
+
+    #[tokio::test]
+    async fn get_rava_ref_data_tickers_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/prices/refdata"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(MOCK_REFDATA_JSON, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = RavaFetcher::get_rava_ref_data_tickers(&server.uri())
+            .await
+            .unwrap();
+
+        assert!(result.contains_key("arg:AAPL"));
+        assert!(result.contains_key("arg:A30C80000J"));
+        assert_eq!(result.keys().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn get_rava_classification_tickers_http_500_should_throw_err() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/prices/clasificacion"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        // This request is made, either fails or it has a wrong data it SHOULD throw error as type DataCollectorError::RavaScrapperError
+        let result = RavaFetcher::get_rava_classification_tickers(&server.uri()).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_rava_classification_tickers_malformed_json_should_throw_err() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/prices/clasificacion"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw("{not valid json", "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = RavaFetcher::get_rava_classification_tickers(&server.uri()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_rava_classification_tickers_empty_field_datos_is_ok_but_empty_map() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/prices/clasificacion"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(r#"{"datos":{}}"#, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = RavaFetcher::get_rava_classification_tickers(&server.uri())
+            .await
+            .unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_historical_prices_single_ticker_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/prices/historico/arg/BYMA"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(MOCK_BYMA_HISTORICAL_JSON, "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let tickers = vec!["BYMA".to_string()];
+        const TOTAL_PRICES_AVAILABLE_FOR_BYMA: usize = 2;
+        let server_uri = server.uri();
+        let result = RavaFetcher::fetch_historical_prices_for_rava_tickers(&server_uri, &tickers)
+            .await
+            .unwrap();
+
+        assert!(result.contains_key("BYMA"));
+
+        assert_eq!(result["BYMA"].len(), TOTAL_PRICES_AVAILABLE_FOR_BYMA);
     }
 }
