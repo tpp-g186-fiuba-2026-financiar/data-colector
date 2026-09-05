@@ -376,3 +376,19 @@ pub async fn persist_rava_historical_prices(
 
     Ok(())
 }
+
+pub async fn get_extended_info_for_ticker(
+    pool: Arc<PgPool>,
+    ticker: &str,
+) -> Result<Option<ItemDescriptionData>, sqlx::Error> {
+    let result: Option<ItemDescriptionData> = sqlx::query_as(
+        r#"
+        SELECT * FROM rava_tickers WHERE ticker = $1
+        "#,
+    )
+    .bind(ticker)
+    .fetch_optional(&*pool)
+    .await?;
+
+    Ok(result)
+}
