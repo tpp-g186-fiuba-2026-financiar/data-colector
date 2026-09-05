@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Deserializer};
+use sqlx::{FromRow, Row};
 
 #[derive(Deserialize, Debug)]
 pub struct RavaClasificacionResponse {
@@ -18,7 +19,6 @@ pub struct ItemData {
     pub sst: String,
     pub text: String,
 }
-
 #[derive(Deserialize, Debug, Clone)]
 pub struct ItemDescriptionData {
     #[serde(rename = "nc")]
@@ -28,6 +28,16 @@ pub struct ItemDescriptionData {
     #[serde(rename = "desc", deserialize_with = "description_deserialize")]
     // it can be nul so we use Option
     pub descripcion: Option<String>,
+}
+
+impl FromRow<'_, sqlx::postgres::PgRow> for ItemDescriptionData {
+    fn from_row(row: &sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        Ok(ItemDescriptionData {
+            nombre_corto: row.try_get("nombre_corto")?,
+            nombre_largo: row.try_get("nombre_largo")?,
+            descripcion: row.try_get("descripcion")?,
+        })
+    }
 }
 
 fn description_deserialize<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
