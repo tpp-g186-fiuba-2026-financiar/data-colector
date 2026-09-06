@@ -33,9 +33,9 @@ pub struct ItemDescriptionData {
 impl FromRow<'_, sqlx::postgres::PgRow> for ItemDescriptionData {
     fn from_row(row: &sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
         Ok(ItemDescriptionData {
-            nombre_corto: row.try_get("nombre_corto")?,
-            nombre_largo: row.try_get("nombre_largo")?,
-            descripcion: row.try_get("descripcion")?,
+            nombre_corto: row.try_get("long_name")?,
+            nombre_largo: row.try_get("short_name")?,
+            descripcion: row.try_get("description")?,
         })
     }
 }
