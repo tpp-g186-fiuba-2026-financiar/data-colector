@@ -31,6 +31,11 @@ pub struct HistoricalDataResponse {
     responses(
         (status = 200, description = "Historical candles for the ticker", body = HistoricalDataResponse, example = json!({
             "status": 200,
+            "ticker_info": {
+                "nombre_corto": "GGAL",
+                "nombre_largo": "Grupo Financiero Galicia S.A.",
+                "descripcion": "Grupo Financiero Galicia S.A. es una empresa argentina ...."
+            },
             "data": [{
                 "ticker": "GGAL",
                 "ts": 1747008000000_i64,
@@ -55,6 +60,19 @@ pub async fn api_get_historical_data(
 
     let historical_data =
         ticker_repository::is_historical_data_available(pool.clone(), &ticker).await;
+
+    let ticker_in_depth_data =
+        match ticker_repository::get_extended_info_for_ticker(pool.clone().into(), &ticker).await {
+            Ok(Some(data)) => Some(data),
+            Ok(None) => {
+                eprintln!("No extended info found for ticker: {}", ticker);
+                None
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch extended info for ticker {}: {}", ticker, e);
+                None
+            }
+        };
 
     if historical_data.is_err() {
         eprintln!(
@@ -168,6 +186,15 @@ pub async fn api_get_historical_data(
 
     let response = serde_json::json!({
         "status": StatusCode::OK.as_u16(),
+        "ticker_info": if let Some(info) = ticker_in_depth_data {
+            serde_json::json!({
+                "nombre_corto": info.nombre_corto,
+                "nombre_largo": info.nombre_largo,
+                "descripcion": info.descripcion,
+            })
+        } else {
+            serde_json::Value::Null
+        },
         "data": historical_data,
         "cached": was_cached
     });
