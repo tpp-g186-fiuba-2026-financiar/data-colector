@@ -8,6 +8,7 @@ use data_collector::{
             byma_persist_historical_price::BymaTickerHistoricalDataPersistor,
             byma_persist_tickers::BymaTickersPersistor,
         },
+        common::CommonScrapper,
         rava_scrapper::rava_scrapper_handler::RavaFetcher,
     },
 };
@@ -81,7 +82,9 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
 
     tokio::spawn(CommoditiesHistoricalPersistor::persist_commodities_historical(dc_state.clone()));
 
-    let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
+    let app = Router::new().merge(data_collector::endpoints::data_collector_router(
+        dc_state.clone(),
+    ));
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
@@ -91,6 +94,10 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
             return Err(DataCollectorError::TcpBindError(e));
         }
     };
+
+    tokio::spawn(CommonScrapper::persist_sector_which_ticker_belongs(
+        dc_state,
+    ));
 
     println!(
         "[Data Collector] API is now starting to deliver on port {} ({})",

@@ -392,3 +392,27 @@ pub async fn get_extended_info_for_ticker(
 
     Ok(result)
 }
+
+pub async fn get_tickers_openbymadata(pool: Arc<PgPool>) -> Result<Vec<String>, sqlx::Error> {
+    let result: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT symbol FROM available_tickers_byma
+        "#,
+    )
+    .fetch_all(&*pool)
+    .await?;
+
+    Ok(result)
+}
+
+pub async fn get_tickers_rava(pool: Arc<PgPool>) -> Result<Vec<String>, sqlx::Error> {
+    let result: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT ticker FROM rava_tickers
+        "#,
+    )
+    .fetch_all(&*pool)
+    .await?;
+
+    Ok(result)
+}
