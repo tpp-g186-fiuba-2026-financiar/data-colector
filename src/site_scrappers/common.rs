@@ -1,5 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
+use tokio::task::JoinSet;
+use yfinance_rs::profile::Profile::Company;
+
 use crate::{
     endpoints::DCState, errors::project_errors::DataCollectorError, persistence::ticker_repository,
 };
@@ -32,10 +35,75 @@ impl CommonScrapper {
         let mut sectors_set: HashSet<String> = HashSet::new();
         sectors_set.extend(tickers_openbymadata.unwrap_or_default());
         sectors_set.extend(tickers_rava.unwrap_or_default());
-        /*let vec_tickers = sectors_set.into_iter().collect::<Vec<String>>();
+        let vec_tickers = sectors_set.into_iter().collect::<Vec<String>>();
 
-        // Lets create yfinance Screener
-        let yfinance_client = dc_state.yf_client.clone();*/
+        let yfinance_client = Arc::new(dc_state.yf_client.clone());
+        const CHUNK_SIZE: usize = 4;
+        for chunk in vec_tickers.chunks(CHUNK_SIZE) {
+            let mut join_set = JoinSet::new();
+
+            for ticker_symbol in chunk {
+                let client = yfinance_client.clone();
+                let sym = ticker_symbol.clone();
+
+                let ticker_curated = format!("{}.BA", sym);
+                join_set.spawn(async move {
+                    let ticker = yfinance_rs::Ticker::new(&client, ticker_curated.clone());
+                    match ticker.info().await {
+                        Ok(info) => {
+                            if let Some(Company(company_profile)) = info.profile {
+                                match company_profile.sector {
+                                    Some(sector) => Some((sym, Some(sector))),
+                                    None => Some((sym, None)),
+                                }
+                            } else {
+                                Some((sym, None))
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[Data Collector] Failed to fetch profile for ticker {}: {}",
+                                sym, e
+                            );
+                            None
+                        }
+                    }
+                });
+            }
+
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(opt_retrieve_data) => match opt_retrieve_data {
+                        Some((ticker_symbol, sector_opt)) => {
+                            if let Some(sector) = sector_opt {
+                                println!(
+                                    "[DataCollector] Ticker '{}' belongs to sector '{}'",
+                                    ticker_symbol, sector
+                                );
+                            } else {
+                                eprintln!(
+                                    "[Data Collector] No sector information available for ticker '{}'",
+                                    ticker_symbol
+                                );
+                            }
+                        }
+                        None => {
+                            eprintln!(
+                                "[Data Collector] No data retrieved for a ticker in the chunk."
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "[Data Collector] Failed to join task for a ticker in the chunk: {}",
+                            e
+                        );
+                    }
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
 
         Ok(())
     }
