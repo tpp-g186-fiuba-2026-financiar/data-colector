@@ -8,6 +8,7 @@ use yfinance_rs::Candle;
 
 use crate::site_scrappers::{
     byma_scrapper::byma_session::TickerQuote,
+    common::TickerInformationFromDataCollector,
     rava_scrapper::rava_structures_responses::{ItemDescriptionData, PriceData},
 };
 
@@ -393,19 +394,40 @@ pub async fn get_extended_info_for_ticker(
     Ok(result)
 }
 
-pub async fn get_tickers_openbymadata(pool: Arc<PgPool>) -> Result<Vec<String>, sqlx::Error> {
+// Pair (ticker, is_commodity)
+pub async fn get_tickers_openbymadata(
+    pool: Arc<PgPool>,
+) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
     let result: Vec<String> = sqlx::query_scalar(
         r#"
-        SELECT symbol FROM available_tickers_byma
+        SELECT symbol, market FROM available_tickers_byma
         "#,
     )
     .fetch_all(&*pool)
     .await?;
 
-    Ok(result)
+    let tickers_info: Vec<TickerInformationFromDataCollector> = result
+        .into_iter()
+        .map(|symbol| {
+            let is_commodity = symbol.contains("COMMODITY"); // Example logic to determine if it's a commodity 
+            let ticker_yfinance_name = match is_commodity {
+                true => format!("{}.BA", symbol),
+                false => symbol.clone(),
+            };
+            TickerInformationFromDataCollector {
+                ticker_symbol: symbol,
+                is_commodity,
+                yfinance_ticker_name: ticker_yfinance_name,
+            }
+        })
+        .collect();
+
+    Ok(tickers_info)
 }
 
-pub async fn get_tickers_rava(pool: Arc<PgPool>) -> Result<Vec<String>, sqlx::Error> {
+pub async fn get_tickers_rava(
+    pool: Arc<PgPool>,
+) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
     let result: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT ticker FROM rava_tickers
@@ -414,5 +436,14 @@ pub async fn get_tickers_rava(pool: Arc<PgPool>) -> Result<Vec<String>, sqlx::Er
     .fetch_all(&*pool)
     .await?;
 
-    Ok(result)
+    // rava doesn't contain tickers that are commodities
+    let tickers_info: Vec<TickerInformationFromDataCollector> = result
+        .into_iter()
+        .map(|symbol| TickerInformationFromDataCollector {
+            ticker_symbol: symbol.clone(),
+            is_commodity: false,
+            yfinance_ticker_name: format!("{}.BA", symbol),
+        })
+        .collect();
+    Ok(tickers_info)
 }

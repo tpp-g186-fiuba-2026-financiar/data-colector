@@ -9,6 +9,13 @@ use crate::{
 
 pub struct CommonScrapper;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TickerInformationFromDataCollector {
+    pub ticker_symbol: String,
+    pub is_commodity: bool,
+    pub yfinance_ticker_name: String,
+}
+
 impl CommonScrapper {
     pub async fn persist_sector_which_ticker_belongs(
         dc_state: DCState,
@@ -32,21 +39,24 @@ impl CommonScrapper {
             ));
         }
         // lets create a unique set of sectors from both sources
-        let mut sectors_set: HashSet<String> = HashSet::new();
+        let mut sectors_set: HashSet<TickerInformationFromDataCollector> = HashSet::new();
         sectors_set.extend(tickers_openbymadata.unwrap_or_default());
         sectors_set.extend(tickers_rava.unwrap_or_default());
-        let vec_tickers = sectors_set.into_iter().collect::<Vec<String>>();
+
+        let vec_tickers = sectors_set
+            .into_iter()
+            .collect::<Vec<TickerInformationFromDataCollector>>();
 
         let yfinance_client = Arc::new(dc_state.yf_client.clone());
         const CHUNK_SIZE: usize = 4;
         for chunk in vec_tickers.chunks(CHUNK_SIZE) {
             let mut join_set = JoinSet::new();
 
-            for ticker_symbol in chunk {
+            for ticker_retrieved_from_db in chunk {
                 let client = yfinance_client.clone();
-                let sym = ticker_symbol.clone();
+                let sym = ticker_retrieved_from_db.ticker_symbol.clone();
 
-                let ticker_curated = format!("{}.BA", sym);
+                let ticker_curated = ticker_retrieved_from_db.yfinance_ticker_name.clone();
                 join_set.spawn(async move {
                     let ticker = yfinance_rs::Ticker::new(&client, ticker_curated.clone());
                     match ticker.info().await {
