@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use tokio::{sync::Semaphore, task::JoinSet};
-use yfinance_rs::profile::Profile::Company;
+use yfinance_rs::profile::{Profile::Company, load_profile};
 
 use crate::{
     endpoints::DCState, errors::project_errors::DataCollectorError, persistence::ticker_repository,
@@ -22,7 +22,7 @@ impl CommonScrapper {
     ) -> Result<(), DataCollectorError<'static>> {
         // The issue comes with the limitation of yfinance, so we wait a little longer in order to make this requests
         // The time is 6 minutes
-        tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+        tokio::time::sleep(Duration::from_secs(2 * 60)).await;
 
         let sqlx_pool = Arc::new(dc_state.sqlx_pool.clone());
 
@@ -54,7 +54,7 @@ impl CommonScrapper {
         let yfinance_client = Arc::new(dc_state.yf_client.clone());
         let semaphore = Arc::new(Semaphore::new(2));
 
-        const CHUNK_SIZE: usize = 4;
+        const CHUNK_SIZE: usize = 1;
         for chunk in vec_tickers.chunks(CHUNK_SIZE) {
             let mut join_set = JoinSet::new();
 
@@ -68,13 +68,11 @@ impl CommonScrapper {
                     // Acquire permit to throttle outgoing request volume
                     let _permit = sem.acquire().await.unwrap();
 
-                    let ticker = yfinance_rs::Ticker::new(&client, ticker_curated.clone());
-
                     tokio::time::sleep(Duration::from_millis(200)).await;
 
-                    match ticker.info().await {
+                    match load_profile(&client, &ticker_curated).await {
                         Ok(info) => {
-                            if let Some(Company(company_profile)) = info.profile {
+                            if let Company(company_profile) = info {
                                 match company_profile.sector {
                                     Some(sector) => Some((sym, Some(sector))),
                                     None => Some((sym, None)),
