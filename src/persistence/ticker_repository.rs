@@ -411,8 +411,8 @@ pub async fn get_tickers_openbymadata(
         .map(|symbol| {
             let is_commodity = symbol.contains("COMMODITY"); // Example logic to determine if it's a commodity 
             let ticker_yfinance_name = match is_commodity {
-                true => format!("{}.BA", symbol),
-                false => symbol.clone(),
+                false => format!("{}.BA", symbol),
+                true => symbol.clone(),
             };
             TickerInformationFromDataCollector {
                 ticker_symbol: symbol,
