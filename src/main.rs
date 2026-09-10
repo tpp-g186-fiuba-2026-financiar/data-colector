@@ -11,9 +11,9 @@ use data_collector::{
         rava_scrapper::rava_scrapper_handler::RavaFetcher,
     },
 };
-use tower_http::cors::{Any, CorsLayer};
 use http::Method;
 use sqlx::postgres::PgPoolOptions;
+use tower_http::cors::{Any, CorsLayer};
 use yfinance_rs::YfClient;
 
 #[tokio::main]
@@ -95,7 +95,9 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         .allow_origin(frontend_url.parse::<http::HeaderValue>().unwrap())
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
-    let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state)).layer(cors);
+    let app = Router::new()
+        .merge(data_collector::endpoints::data_collector_router(dc_state))
+        .layer(cors);
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
