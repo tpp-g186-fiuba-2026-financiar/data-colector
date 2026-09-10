@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use tokio::{sync::Semaphore, task::JoinSet};
-use yfinance_rs::profile::{Profile::Company, load_profile};
+use yfinance_rs::{Ticker, YfClient, profile::Profile::Company};
 
 use crate::{
     endpoints::DCState, errors::project_errors::DataCollectorError, persistence::ticker_repository,
@@ -25,6 +25,14 @@ impl CommonScrapper {
         tokio::time::sleep(Duration::from_secs(2 * 60)).await;
 
         let sqlx_pool = Arc::new(dc_state.sqlx_pool.clone());
+
+        let yfinance_client_new  = match YfClient::builder()
+        .user_agent("Mozilla/5.0 (Linux; Android 9; W-K510-EEA Build/PPR1.181008.011) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6187.0 Safari/537.36")
+        .build() {
+
+            Ok(client) => client,
+            Err(e) => return Err(DataCollectorError::YFinanceClientError(e)),
+        };
 
         let (tickers_openbymadata, tickers_rava) = tokio::join!(
             ticker_repository::get_tickers_openbymadata(sqlx_pool.clone()),
@@ -51,7 +59,6 @@ impl CommonScrapper {
             .into_iter()
             .collect::<Vec<TickerInformationFromDataCollector>>();
 
-        let yfinance_client = Arc::new(dc_state.yf_client.clone());
         let semaphore = Arc::new(Semaphore::new(2));
 
         const CHUNK_SIZE: usize = 1;
@@ -59,7 +66,7 @@ impl CommonScrapper {
             let mut join_set = JoinSet::new();
 
             for ticker_retrieved_from_db in chunk {
-                let client = yfinance_client.clone();
+                let client = yfinance_client_new.clone();
                 let sym = ticker_retrieved_from_db.ticker_symbol.clone();
                 let ticker_curated = ticker_retrieved_from_db.yfinance_ticker_name.clone();
                 let sem = semaphore.clone();
@@ -69,10 +76,11 @@ impl CommonScrapper {
                     let _permit = sem.acquire().await.unwrap();
 
                     tokio::time::sleep(Duration::from_millis(200)).await;
+                    let ticker = Ticker::new(&client, &ticker_curated);
 
-                    match load_profile(&client, &ticker_curated).await {
+                    match ticker.info().await {
                         Ok(info) => {
-                            if let Company(company_profile) = info {
+                            if let Some(Company(company_profile)) = info.profile {
                                 match company_profile.sector {
                                     Some(sector) => Some((sym, Some(sector))),
                                     None => Some((sym, None)),
