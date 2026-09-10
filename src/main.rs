@@ -97,7 +97,9 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
     let app = Router::new()
-        .merge(data_collector::endpoints::data_collector_router(dc_state))
+        .merge(data_collector::endpoints::data_collector_router(
+            dc_state.clone(),
+        ))
         .layer(cors);
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
@@ -110,7 +112,7 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
     };
 
     tokio::spawn(CommonScrapper::persist_sector_which_ticker_belongs(
-        dc_state,
+        dc_state.clone(),
     ));
 
     println!(
