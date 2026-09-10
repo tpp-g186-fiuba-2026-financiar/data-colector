@@ -1,7 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use tokio::task::JoinSet;
-use yfinance_rs::profile::Profile::Company;
+use tokio::{sync::Semaphore, task::JoinSet};
+use yfinance_rs::{Ticker, YfClient, profile::Profile::Company};
 
 use crate::{
     endpoints::DCState, errors::project_errors::DataCollectorError, persistence::ticker_repository,
@@ -20,7 +20,19 @@ impl CommonScrapper {
     pub async fn persist_sector_which_ticker_belongs(
         dc_state: DCState,
     ) -> Result<(), DataCollectorError<'static>> {
+        // The issue comes with the limitation of yfinance, so we wait a little longer in order to make this requests
+        // The time is 6 minutes
+        tokio::time::sleep(Duration::from_secs(2 * 60)).await;
+
         let sqlx_pool = Arc::new(dc_state.sqlx_pool.clone());
+
+        let yfinance_client_new  = match YfClient::builder()
+        .user_agent("Mozilla/5.0 (Linux; Android 9; W-K510-EEA Build/PPR1.181008.011) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6187.0 Safari/537.36")
+        .build() {
+
+            Ok(client) => client,
+            Err(e) => return Err(DataCollectorError::YFinanceClientError(e)),
+        };
 
         let (tickers_openbymadata, tickers_rava) = tokio::join!(
             ticker_repository::get_tickers_openbymadata(sqlx_pool.clone()),
@@ -38,7 +50,7 @@ impl CommonScrapper {
                 sqlx::Error::Protocol("Not found any tickers!".into()),
             ));
         }
-        // lets create a unique set of sectors from both sources
+
         let mut sectors_set: HashSet<TickerInformationFromDataCollector> = HashSet::new();
         sectors_set.extend(tickers_openbymadata.unwrap_or_default());
         sectors_set.extend(tickers_rava.unwrap_or_default());
@@ -47,18 +59,25 @@ impl CommonScrapper {
             .into_iter()
             .collect::<Vec<TickerInformationFromDataCollector>>();
 
-        let yfinance_client = Arc::new(dc_state.yf_client.clone());
-        const CHUNK_SIZE: usize = 4;
+        let semaphore = Arc::new(Semaphore::new(2));
+
+        const CHUNK_SIZE: usize = 1;
         for chunk in vec_tickers.chunks(CHUNK_SIZE) {
             let mut join_set = JoinSet::new();
 
             for ticker_retrieved_from_db in chunk {
-                let client = yfinance_client.clone();
+                let client = yfinance_client_new.clone();
                 let sym = ticker_retrieved_from_db.ticker_symbol.clone();
-
                 let ticker_curated = ticker_retrieved_from_db.yfinance_ticker_name.clone();
+                let sem = semaphore.clone();
+
                 join_set.spawn(async move {
-                    let ticker = yfinance_rs::Ticker::new(&client, ticker_curated.clone());
+                    // Acquire permit to throttle outgoing request volume
+                    let _permit = sem.acquire().await.unwrap();
+
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    let ticker = Ticker::new(&client, &ticker_curated);
+
                     match ticker.info().await {
                         Ok(info) => {
                             if let Some(Company(company_profile)) = info.profile {
@@ -124,8 +143,7 @@ impl CommonScrapper {
                     }
                 }
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
 
         Ok(())
