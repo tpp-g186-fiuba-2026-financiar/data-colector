@@ -6,6 +6,7 @@ pub enum DataCollectorError<'a> {
     EnviromentFileError(Error),
     EnviromentVariableError(&'a str, VarError),
     PosgresConnectionError(sqlx::Error),
+    PostgresQueryError(sqlx::Error),
     TcpBindError(std::io::Error),
     AxumServeError(std::io::Error),
     BymaScrapperError(&'a str),
@@ -85,6 +86,9 @@ impl std::fmt::Display for DataCollectorError<'_> {
             }
             DataCollectorError::RavaScrapperError(err) => {
                 write!(f, "{}: Rava scrapper error: {}", prefix, err)
+            }
+            DataCollectorError::PostgresQueryError(err) => {
+                write!(f, "{}: Postgres query error: {}", prefix, err)
             }
         }
     }

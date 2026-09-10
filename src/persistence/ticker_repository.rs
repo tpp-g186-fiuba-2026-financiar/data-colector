@@ -8,6 +8,7 @@ use yfinance_rs::Candle;
 
 use crate::site_scrappers::{
     byma_scrapper::byma_session::TickerQuote,
+    common::TickerInformationFromDataCollector,
     rava_scrapper::rava_structures_responses::{ItemDescriptionData, PriceData},
 };
 
@@ -391,4 +392,79 @@ pub async fn get_extended_info_for_ticker(
     .await?;
 
     Ok(result)
+}
+
+// Pair (ticker, is_commodity)
+pub async fn get_tickers_openbymadata(
+    pool: Arc<PgPool>,
+) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
+    let result: Vec<(String, String)> = sqlx::query_scalar(
+        r#"
+        SELECT symbol, market FROM available_tickers_byma
+        "#,
+    )
+    .fetch_all(&*pool)
+    .await?;
+
+    let tickers_info: Vec<TickerInformationFromDataCollector> = result
+        .into_iter()
+        .map(|(symbol, market)| {
+            let is_commodity = market.contains("COMMODITY");
+            let ticker_yfinance_name = match is_commodity {
+                false => format!("{}.BA", symbol),
+                true => symbol.clone(),
+            };
+            TickerInformationFromDataCollector {
+                ticker_symbol: symbol,
+                is_commodity,
+                yfinance_ticker_name: ticker_yfinance_name,
+            }
+        })
+        .collect();
+
+    Ok(tickers_info)
+}
+
+pub async fn get_tickers_rava(
+    pool: Arc<PgPool>,
+) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
+    let result: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT ticker FROM rava_tickers
+        "#,
+    )
+    .fetch_all(&*pool)
+    .await?;
+
+    // rava doesn't contain tickers that are commodities
+    let tickers_info: Vec<TickerInformationFromDataCollector> = result
+        .into_iter()
+        .map(|symbol| TickerInformationFromDataCollector {
+            ticker_symbol: symbol.clone(),
+            is_commodity: false,
+            yfinance_ticker_name: format!("{}.BA", symbol),
+        })
+        .collect();
+    Ok(tickers_info)
+}
+
+pub async fn insert_ticker_sector(
+    pool: Arc<PgPool>,
+    ticker: &str,
+    sector: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO ticker_sector (ticker, sector)
+        VALUES ($1, $2)
+        ON CONFLICT (ticker) DO UPDATE SET
+            sector = EXCLUDED.sector
+        "#,
+    )
+    .bind(ticker)
+    .bind(sector)
+    .execute(&*pool)
+    .await?;
+
+    Ok(())
 }
