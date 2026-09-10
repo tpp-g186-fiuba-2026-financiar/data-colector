@@ -398,7 +398,7 @@ pub async fn get_extended_info_for_ticker(
 pub async fn get_tickers_openbymadata(
     pool: Arc<PgPool>,
 ) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
-    let result: Vec<String> = sqlx::query_scalar(
+    let result: Vec<(String, String)> = sqlx::query_scalar(
         r#"
         SELECT symbol, market FROM available_tickers_byma
         "#,
@@ -408,8 +408,8 @@ pub async fn get_tickers_openbymadata(
 
     let tickers_info: Vec<TickerInformationFromDataCollector> = result
         .into_iter()
-        .map(|symbol| {
-            let is_commodity = symbol.contains("COMMODITY"); // Example logic to determine if it's a commodity 
+        .map(|(symbol, market)| {
+            let is_commodity = market.contains("COMMODITY");
             let ticker_yfinance_name = match is_commodity {
                 false => format!("{}.BA", symbol),
                 true => symbol.clone(),
