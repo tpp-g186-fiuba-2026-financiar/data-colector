@@ -20,6 +20,10 @@ impl CommonScrapper {
     pub async fn persist_sector_which_ticker_belongs(
         dc_state: DCState,
     ) -> Result<(), DataCollectorError<'static>> {
+        // The issue comes with the limitation of yfinance, so we wait a little longer in order to make this requests
+        // The time is 6 minutes
+        tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+
         let sqlx_pool = Arc::new(dc_state.sqlx_pool.clone());
 
         let (tickers_openbymadata, tickers_rava) = tokio::join!(
