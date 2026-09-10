@@ -11,7 +11,9 @@ use data_collector::{
         rava_scrapper::rava_scrapper_handler::RavaFetcher,
     },
 };
+use http::Method;
 use sqlx::postgres::PgPoolOptions;
+use tower_http::cors::{Any, CorsLayer};
 use yfinance_rs::YfClient;
 
 #[tokio::main]
@@ -34,6 +36,15 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
         Ok(port) => port,
         Err(e) => {
             return Err(DataCollectorError::EnviromentVariableError("API_PORT", e));
+        }
+    };
+    let frontend_url = match std::env::var("FRONTEND_URL") {
+        Ok(url) => url,
+        Err(e) => {
+            return Err(DataCollectorError::EnviromentVariableError(
+                "FRONTEND_URL",
+                e,
+            ));
         }
     };
 
@@ -80,8 +91,13 @@ async fn main() -> Result<(), DataCollectorError<'static>> {
     );
 
     tokio::spawn(CommoditiesHistoricalPersistor::persist_commodities_historical(dc_state.clone()));
-
-    let app = Router::new().merge(data_collector::endpoints::data_collector_router(dc_state));
+    let cors = CorsLayer::new()
+        .allow_origin(frontend_url.parse::<http::HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(Any);
+    let app = Router::new()
+        .merge(data_collector::endpoints::data_collector_router(dc_state))
+        .layer(cors);
 
     let formatted_addr = format!("0.0.0.0:{}", api_port);
 
