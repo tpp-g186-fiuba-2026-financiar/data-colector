@@ -86,10 +86,23 @@ impl CommonScrapper {
                     Ok(opt_retrieve_data) => match opt_retrieve_data {
                         Some((ticker_symbol, sector_opt)) => {
                             if let Some(sector) = sector_opt {
-                                println!(
-                                    "[DataCollector] Ticker '{}' belongs to sector '{}'",
-                                    ticker_symbol, sector
-                                );
+                                if let Err(e) = ticker_repository::insert_ticker_sector(
+                                    sqlx_pool.clone(),
+                                    &ticker_symbol,
+                                    &sector,
+                                )
+                                .await
+                                {
+                                    eprintln!(
+                                        "[Data Collector] Failed to insert sector for ticker '{}': {}",
+                                        ticker_symbol, e
+                                    );
+                                } else {
+                                    println!(
+                                        "[Data Collector] Successfully inserted sector for ticker '{}': {}",
+                                        ticker_symbol, sector
+                                    );
+                                }
                             } else {
                                 eprintln!(
                                     "[Data Collector] No sector information available for ticker '{}'",

@@ -447,3 +447,24 @@ pub async fn get_tickers_rava(
         .collect();
     Ok(tickers_info)
 }
+
+pub async fn insert_ticker_sector(
+    pool: Arc<PgPool>,
+    ticker: &str,
+    sector: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO ticker_sector (ticker, sector)
+        VALUES ($1, $2)
+        ON CONFLICT (ticker) DO UPDATE SET
+            sector = EXCLUDED.sector
+        "#,
+    )
+    .bind(ticker)
+    .bind(sector)
+    .execute(&*pool)
+    .await?;
+
+    Ok(())
+}
