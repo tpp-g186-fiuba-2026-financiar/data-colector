@@ -178,3 +178,172 @@ fn error_response(status: StatusCode, message: &str) -> axum::Json<serde_json::V
         "message": { "error": message },
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{Path, State};
+    use rust_decimal::Decimal;
+    use sqlx::PgPool;
+    use yfinance_rs::YfClient;
+
+    fn point(source: &str, series: &str, ts: i64, value: i64) -> InterestRatePoint {
+        InterestRatePoint {
+            source: source.to_string(),
+            series_id: series.to_string(),
+            ts,
+            value: Decimal::new(value, 0),
+        }
+    }
+
+    fn state(pool: PgPool) -> DCState {
+        DCState {
+            sqlx_pool: pool,
+            yf_client: YfClient::builder()
+                .user_agent("coverage-test")
+                .build()
+                .unwrap(),
+        }
+    }
+
+    #[sqlx::test]
+    async fn interest_rate_cache_covers_fresh_stale_missing_and_error_paths(pool: PgPool) {
+        let now = chrono::Utc::now().timestamp_millis();
+        interest_rate_repository::update_cache(
+            pool.clone(),
+            "US",
+            "TNX",
+            vec![point("US", "TNX", now, 4)],
+        )
+        .await
+        .unwrap();
+        let response = handle_request(pool.clone(), "US", "TNX", |_| async {
+            panic!("a fresh cache must not invoke the fetcher")
+        })
+        .await;
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], true);
+
+        interest_rate_repository::update_cache(
+            pool.clone(),
+            "US",
+            "IRX",
+            vec![point("US", "IRX", 0, 1)],
+        )
+        .await
+        .unwrap();
+        let response = handle_request(pool.clone(), "US", "IRX", |_| async {
+            Ok(vec![point("US", "IRX", 10, 2)])
+        })
+        .await;
+        assert_eq!(response.0["cached"], false);
+        let cached = interest_rate_repository::is_cached(pool.clone(), "US", "IRX")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.1, 10);
+
+        interest_rate_repository::update_cache(
+            pool.clone(),
+            "AR",
+            "TPM",
+            vec![point("AR", "TPM", 0, 30)],
+        )
+        .await
+        .unwrap();
+        let response = handle_request(pool.clone(), "AR", "TPM", |_| async {
+            Err("BCRA unavailable".to_string())
+        })
+        .await;
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], true);
+
+        let response = handle_request(pool.clone(), "AR", "BADLAR", |_| async {
+            Ok(vec![point("AR", "BADLAR", 20, 35)])
+        })
+        .await;
+        assert_eq!(response.0["cached"], false);
+        assert!(
+            interest_rate_repository::is_cached(pool.clone(), "AR", "BADLAR")
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        let response = handle_request(pool.clone(), "US", "MISSING", |_| async {
+            Err("unsupported".to_string())
+        })
+        .await;
+        assert_eq!(response.0["status"], 500);
+
+        let response =
+            api_get_us_interest_rate(State(state(pool.clone())), Path("TNX".to_string())).await;
+        assert_eq!(response.0["status"], 200);
+        let response =
+            api_get_ar_interest_rate(State(state(pool.clone())), Path("TPM".to_string())).await;
+        assert_eq!(response.0["status"], 200);
+
+        pool.close().await;
+        let response = handle_request(pool, "US", "TNX", |_| async { Ok(Vec::new()) }).await;
+        assert_eq!(response.0["status"], 500);
+        assert_eq!(
+            response.0["message"]["error"],
+            "Failed to read interest rate cache"
+        );
+    }
+
+    /// `series_id` values longer than the `interest_rate_cached.series_id`
+    /// column (`VARCHAR(20)`) make `update_cache`'s INSERT fail, which is a
+    /// convenient way to exercise the "fetch succeeded but persisting the
+    /// cache failed" branches without needing to sever the DB connection.
+    fn point_with_oversized_series_id(source: &str) -> InterestRatePoint {
+        InterestRatePoint {
+            source: source.to_string(),
+            series_id: "X".repeat(64),
+            ts: 999,
+            value: Decimal::new(1, 0),
+        }
+    }
+
+    #[sqlx::test]
+    async fn handle_request_reports_cache_write_failure_after_stale_refetch(pool: PgPool) {
+        interest_rate_repository::update_cache(
+            pool.clone(),
+            "US",
+            "STALE",
+            vec![point("US", "STALE", 0, 1)],
+        )
+        .await
+        .unwrap();
+
+        let response = handle_request(pool.clone(), "US", "STALE", |_| async {
+            Ok(vec![point_with_oversized_series_id("US")])
+        })
+        .await;
+
+        assert_eq!(response.0["status"], 500);
+        assert_eq!(
+            response.0["message"]["error"],
+            "Failed to update interest rate cache"
+        );
+    }
+
+    #[sqlx::test]
+    async fn handle_request_serves_fresh_data_even_when_cache_write_fails(pool: PgPool) {
+        let response = handle_request(pool.clone(), "US", "NOCACHE", |_| async {
+            Ok(vec![point_with_oversized_series_id("US")])
+        })
+        .await;
+
+        // Persisting the newly-fetched data fails, but the endpoint should
+        // still hand back the freshly fetched (uncached) data to the caller.
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], false);
+        assert!(
+            interest_rate_repository::is_cached(pool, "US", "NOCACHE")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+}

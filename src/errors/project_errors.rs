@@ -93,3 +93,116 @@ impl std::fmt::Display for DataCollectorError<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::PgPool;
+    use std::ffi::OsString;
+
+    #[test]
+    fn formats_environment_file_and_invalid_unicode_variable_errors() {
+        let file_error =
+            DataCollectorError::EnviromentFileError(dotenv::Error::LineParse("bad=line".into(), 3));
+        assert!(file_error.to_string().contains("[DataCollectorError]"));
+
+        let invalid_unicode = DataCollectorError::EnviromentVariableError(
+            "LANG",
+            VarError::NotUnicode(OsString::from("\u{0}bad")),
+        );
+        assert!(
+            invalid_unicode
+                .to_string()
+                .contains("contains invalid unicode")
+        );
+    }
+
+    #[test]
+    fn formats_tls_protocol_migration_and_yfinance_errors() {
+        let tls_err = DataCollectorError::PosgresConnectionError(sqlx::Error::Tls(Box::new(
+            std::io::Error::other("handshake failed"),
+        )));
+        assert!(tls_err.to_string().contains("TLS error"));
+
+        let protocol_err = DataCollectorError::PosgresConnectionError(sqlx::Error::Protocol(
+            "unexpected byte".to_string(),
+        ));
+        assert!(protocol_err.to_string().contains("Protocol error"));
+
+        let migration_err =
+            DataCollectorError::MigrationError(sqlx::migrate::MigrateError::VersionMissing(1));
+        assert!(migration_err.to_string().contains("Migration error"));
+
+        let yfinance_err =
+            DataCollectorError::YFinanceClientError(yfinance_rs::YfError::NotFound {
+                url: "https://example.invalid/missing".to_string(),
+            });
+        assert!(yfinance_err.to_string().contains("YFinance client error"));
+    }
+
+    #[sqlx::test]
+    async fn formats_real_database_error_from_postgres(pool: PgPool) {
+        let db_error = sqlx::query("SELECT * FROM this_table_does_not_exist")
+            .execute(&pool)
+            .await
+            .unwrap_err();
+
+        let wrapped = DataCollectorError::PosgresConnectionError(db_error);
+        assert!(wrapped.to_string().contains("Database error"));
+    }
+
+    #[test]
+    fn formats_configuration_io_domain_and_database_errors() {
+        let missing =
+            DataCollectorError::EnviromentVariableError("DATABASE_URL", VarError::NotPresent);
+        assert!(missing.to_string().contains("DATABASE_URL"));
+
+        let io = || std::io::Error::other("boom");
+        assert!(
+            DataCollectorError::TcpBindError(io())
+                .to_string()
+                .contains("Failed to bind")
+        );
+        assert!(
+            DataCollectorError::AxumServeError(io())
+                .to_string()
+                .contains("Failed to start")
+        );
+        assert!(
+            DataCollectorError::BymaScrapperError("offline")
+                .to_string()
+                .contains("offline")
+        );
+        assert!(
+            DataCollectorError::BymaInformationNotAvailable("quotes")
+                .to_string()
+                .contains("quotes")
+        );
+        assert!(
+            DataCollectorError::RavaScrapperError("invalid")
+                .to_string()
+                .contains("invalid")
+        );
+
+        assert!(
+            DataCollectorError::PosgresConnectionError(sqlx::Error::Io(io()))
+                .to_string()
+                .contains("I/O error")
+        );
+        assert!(
+            DataCollectorError::PosgresConnectionError(sqlx::Error::RowNotFound)
+                .to_string()
+                .contains("Unknown error")
+        );
+        assert!(
+            DataCollectorError::PersistenceError(sqlx::Error::RowNotFound)
+                .to_string()
+                .contains("Persistence error")
+        );
+        assert!(
+            DataCollectorError::PostgresQueryError(sqlx::Error::RowNotFound)
+                .to_string()
+                .contains("Postgres query error")
+        );
+    }
+}

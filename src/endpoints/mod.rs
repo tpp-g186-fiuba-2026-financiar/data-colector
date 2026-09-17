@@ -96,3 +96,56 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .with_state(dc_state)
         .merge(swagger)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::State;
+    use sqlx::PgPool;
+
+    fn state(pool: PgPool) -> DCState {
+        DCState {
+            sqlx_pool: pool,
+            yf_client: YfClient::builder()
+                .user_agent("coverage-test")
+                .build()
+                .unwrap(),
+        }
+    }
+
+    #[sqlx::test]
+    async fn router_and_general_endpoints_cover_healthy_ready_and_database_errors(pool: PgPool) {
+        sqlx::query("INSERT INTO available_tickers_byma (symbol, market) VALUES ('READY', 'test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO ticker_history_data_cached_yf
+                (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount)
+            SELECT 'READY', value, 1, 1, 1, 1, 1, 1
+            FROM generate_series(1, 100) AS value
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dc_state = state(pool.clone());
+        let _router = data_collector_router(dc_state.clone());
+        assert!(root::root_check().await.contains("Data Collector API"));
+        let health = health::health_check(State(dc_state.clone())).await;
+        assert_eq!(health.0["status"], 200);
+        let ready = model_ready_tickers::api_get_model_ready_tickers(State(dc_state.clone())).await;
+        assert_eq!(ready.0["status"], 200);
+        assert_eq!(ready.0["message"]["tickers"], serde_json::json!(["READY"]));
+
+        pool.close().await;
+        let health = health::health_check(State(dc_state.clone())).await;
+        assert_eq!(health.0["status"], 503);
+        let available = available_tickers::api_get_available_tickers(State(dc_state.clone())).await;
+        assert_eq!(available.0["status"], 500);
+        let ready = model_ready_tickers::api_get_model_ready_tickers(State(dc_state)).await;
+        assert_eq!(ready.0["status"], 500);
+    }
+}

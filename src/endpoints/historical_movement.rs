@@ -335,4 +335,84 @@ mod tests {
 
         assert_eq!(response.0["status"], 422);
     }
+
+    #[sqlx::test]
+    async fn test_get_historical_movement_validation_and_range_errors(pool: PgPool) {
+        let state = build_test_state(pool.clone()).await;
+        let invalid_date = api_get_historical_movement(
+            State(state.clone()),
+            Path(" ggal ".to_string()),
+            Query(MovementQuery {
+                from: "17-09-2026".to_string(),
+                days: 1,
+            }),
+        )
+        .await;
+        assert_eq!(invalid_date.0["status"], 422);
+
+        let empty = api_get_historical_movement(
+            State(state.clone()),
+            Path("missing".to_string()),
+            Query(MovementQuery {
+                from: "2026-09-17".to_string(),
+                days: 1,
+            }),
+        )
+        .await;
+        assert_eq!(empty.0["status"], 404);
+
+        sqlx::query("INSERT INTO available_tickers_byma (symbol, market) VALUES ('GGAL', 'test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (date, close) in [("2026-09-15", 100.0), ("2026-09-16", 105.0)] {
+            let ts = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis();
+            sqlx::query(
+                "INSERT INTO ticker_history_data_cached_yf (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount) VALUES ('GGAL', $1, 1, $2, $2, $2, $2, $2)",
+            )
+            .bind(ts)
+            .bind(close)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let before_range = api_get_historical_movement(
+            State(state.clone()),
+            Path("GGAL".to_string()),
+            Query(MovementQuery {
+                from: "2026-09-01".to_string(),
+                days: 1,
+            }),
+        )
+        .await;
+        assert_eq!(before_range.0["status"], 422);
+        let future_target = api_get_historical_movement(
+            State(state.clone()),
+            Path("GGAL".to_string()),
+            Query(MovementQuery {
+                from: "2026-09-16".to_string(),
+                days: 5,
+            }),
+        )
+        .await;
+        assert_eq!(future_target.0["status"], 422);
+
+        pool.close().await;
+        let database_error = api_get_historical_movement(
+            State(state),
+            Path("GGAL".to_string()),
+            Query(MovementQuery {
+                from: "2026-09-16".to_string(),
+                days: 1,
+            }),
+        )
+        .await;
+        assert_eq!(database_error.0["status"], 500);
+    }
 }

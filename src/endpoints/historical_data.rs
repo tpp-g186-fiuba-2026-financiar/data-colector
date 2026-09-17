@@ -227,6 +227,8 @@ mod tests {
     use super::*;
     use axum::extract::{Path, State};
     use sqlx::PgPool;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn build_test_dc_state(pool: PgPool) -> DCState {
         let yf_client = YfClient::builder()
@@ -237,6 +239,88 @@ mod tests {
             sqlx_pool: pool,
             yf_client,
         }
+    }
+
+    /// Builds a `DCState` whose `YfClient` points its chart-API base URL at a
+    /// mock server, so tests can exercise the Yahoo Finance fetch paths
+    /// without touching the network.
+    async fn build_test_dc_state_with_mock_chart(pool: PgPool, server: &MockServer) -> DCState {
+        let yf_client = YfClient::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .base_chart(url::Url::parse(&format!("{}/v8/finance/chart/", server.uri())).unwrap())
+            .build()
+            .expect("Error generating YfClient with mocked chart base for test state");
+
+        DCState {
+            sqlx_pool: pool,
+            yf_client,
+        }
+    }
+
+    /// Builds a minimal, valid Yahoo Finance `/v8/finance/chart/{symbol}` JSON
+    /// payload with `num_points` daily candles, starting from a fixed epoch.
+    fn build_chart_json(symbol: &str, num_points: usize) -> String {
+        let base_ts: i64 = 1_700_000_000;
+        let mut timestamps = Vec::with_capacity(num_points);
+        let mut open = Vec::with_capacity(num_points);
+        let mut high = Vec::with_capacity(num_points);
+        let mut low = Vec::with_capacity(num_points);
+        let mut close = Vec::with_capacity(num_points);
+        let mut adjclose = Vec::with_capacity(num_points);
+        let mut volume = Vec::with_capacity(num_points);
+
+        for i in 0..num_points {
+            let price = 100.0 + i as f64;
+            timestamps.push(base_ts + (i as i64) * 86_400);
+            open.push(price);
+            high.push(price + 1.0);
+            low.push(price - 1.0);
+            close.push(price);
+            adjclose.push(price);
+            volume.push(1_000_u64 + i as u64);
+        }
+
+        serde_json::json!({
+            "chart": {
+                "error": serde_json::Value::Null,
+                "result": [{
+                    "meta": {
+                        "currency": "USD",
+                        "symbol": symbol,
+                        "timezone": "America/New_York",
+                        "gmtoffset": -14_400,
+                    },
+                    "timestamp": timestamps,
+                    "indicators": {
+                        "quote": [{
+                            "open": open,
+                            "high": high,
+                            "low": low,
+                            "close": close,
+                            "volume": volume,
+                        }],
+                        "adjclose": [{ "adjclose": adjclose }],
+                    },
+                }],
+            }
+        })
+        .to_string()
+    }
+
+    async fn mount_chart_mock(server: &MockServer, ticker_symbol: &str, body: &str) {
+        Mock::given(method("GET"))
+            .and(path(format!("/v8/finance/chart/{}.BA", ticker_symbol)))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body, "application/json"))
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_chart_error_mock(server: &MockServer, ticker_symbol: &str, status: u16) {
+        Mock::given(method("GET"))
+            .and(path(format!("/v8/finance/chart/{}.BA", ticker_symbol)))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(server)
+            .await;
     }
 
     #[sqlx::test]
@@ -252,6 +336,14 @@ mod tests {
                 last_history_price_cached_at TIMESTAMP WITH TIME ZONE
             )",
         )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO rava_tickers (ticker, short_name, long_name, description) VALUES ($1, 'Galicia', 'Grupo Financiero Galicia', 'Banco argentino')",
+        )
+        .bind(ticker_symbol)
         .execute(&pool)
         .await
         .unwrap();
@@ -318,8 +410,187 @@ mod tests {
 
         assert_eq!(response.0["status"], 200);
         assert_eq!(response.0["cached"], true);
+        assert_eq!(response.0["ticker_info"]["descripcion"], "Banco argentino");
 
         let data_array = response.0["data"].as_array().unwrap();
         assert!(!data_array.is_empty());
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_reports_database_failure(pool: PgPool) {
+        let dc_state = build_test_dc_state(pool.clone()).await;
+        pool.close().await;
+
+        let response = api_get_historical_data(State(dc_state), Path("GGAL".to_string())).await;
+
+        assert_eq!(response.0["status"], 500);
+        assert_eq!(
+            response.0["message"]["error"],
+            "Failed to fetch historical data from database"
+        );
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_fetches_from_yahoo_when_uncached_and_backfills_catalog(
+        pool: PgPool,
+    ) {
+        let ticker_symbol = "NEWT";
+        let server = MockServer::start().await;
+        mount_chart_mock(
+            &server,
+            ticker_symbol,
+            &build_chart_json(ticker_symbol, 105),
+        )
+        .await;
+
+        let dc_state = build_test_dc_state_with_mock_chart(pool.clone(), &server).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], false);
+        assert!(response.0["ticker_info"].is_null());
+
+        let data_array = response.0["data"].as_array().unwrap();
+        assert_eq!(data_array.len(), 105);
+
+        // The catalog/history persistence happens in a spawned background
+        // task; give it a chance to run before asserting on its side effects.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let ticker_added: Option<String> =
+            sqlx::query_scalar("SELECT symbol FROM available_tickers_byma WHERE symbol = $1")
+                .bind(ticker_symbol)
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(ticker_added.as_deref(), Some(ticker_symbol));
+
+        let cached_rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ticker_history_data_cached_yf WHERE ticker = $1",
+        )
+        .bind(ticker_symbol)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cached_rows, 105);
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_skips_catalog_when_yahoo_history_is_too_short(pool: PgPool) {
+        let ticker_symbol = "TINY";
+        let server = MockServer::start().await;
+        mount_chart_mock(&server, ticker_symbol, &build_chart_json(ticker_symbol, 5)).await;
+
+        let dc_state = build_test_dc_state_with_mock_chart(pool.clone(), &server).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], false);
+        assert_eq!(response.0["data"].as_array().unwrap().len(), 5);
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let ticker_added: Option<String> =
+            sqlx::query_scalar("SELECT symbol FROM available_tickers_byma WHERE symbol = $1")
+                .bind(ticker_symbol)
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert!(
+            ticker_added.is_none(),
+            "a ticker with too little history must not be added to the model catalog"
+        );
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_reports_yahoo_failure_when_uncached(pool: PgPool) {
+        let ticker_symbol = "FAIL";
+        let server = MockServer::start().await;
+        mount_chart_error_mock(&server, ticker_symbol, 500).await;
+
+        let dc_state = build_test_dc_state_with_mock_chart(pool, &server).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 500);
+        assert_eq!(
+            response.0["message"]["error"],
+            "Failed to fetch historical data from Yahoo Finance"
+        );
+    }
+
+    async fn seed_stale_cached_history(pool: &PgPool, ticker_symbol: &str) {
+        sqlx::query(
+            "INSERT INTO available_tickers_byma (symbol, market) VALUES ($1, 'leading-equity') ON CONFLICT (symbol) DO NOTHING"
+        )
+        .bind(ticker_symbol)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        // A tiny `ts` (well below "5 days ago" in seconds) makes the cached
+        // row look stale, forcing the endpoint down the refetch path.
+        sqlx::query(
+            "INSERT INTO ticker_history_data_cached_yf (ticker, ts, volume, open_amount, high_amount, low_amount, close_amount, close_unadj_amount)
+             VALUES ($1, 1000, 10, 1.0, 2.0, 0.5, 1.5, 1.5)"
+        )
+        .bind(ticker_symbol)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_refetches_when_cache_is_stale(pool: PgPool) {
+        let ticker_symbol = "STAL";
+        seed_stale_cached_history(&pool, ticker_symbol).await;
+
+        let server = MockServer::start().await;
+        mount_chart_mock(&server, ticker_symbol, &build_chart_json(ticker_symbol, 10)).await;
+
+        let dc_state = build_test_dc_state_with_mock_chart(pool.clone(), &server).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 200);
+        assert_eq!(response.0["cached"], true);
+        assert_eq!(response.0["data"].as_array().unwrap().len(), 10);
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let cached_rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ticker_history_data_cached_yf WHERE ticker = $1",
+        )
+        .bind(ticker_symbol)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cached_rows, 10);
+    }
+
+    #[sqlx::test]
+    async fn test_get_historical_data_reports_yahoo_failure_when_cache_is_stale(pool: PgPool) {
+        let ticker_symbol = "STLF";
+        seed_stale_cached_history(&pool, ticker_symbol).await;
+
+        let server = MockServer::start().await;
+        mount_chart_error_mock(&server, ticker_symbol, 500).await;
+
+        let dc_state = build_test_dc_state_with_mock_chart(pool, &server).await;
+
+        let response =
+            api_get_historical_data(State(dc_state), Path(ticker_symbol.to_string())).await;
+
+        assert_eq!(response.0["status"], 500);
+        assert_eq!(
+            response.0["message"]["error"],
+            "Failed to fetch historical data from Yahoo Finance"
+        );
     }
 }

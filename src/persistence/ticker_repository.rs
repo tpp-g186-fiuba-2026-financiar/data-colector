@@ -398,7 +398,7 @@ pub async fn get_extended_info_for_ticker(
 pub async fn get_tickers_openbymadata(
     pool: Arc<PgPool>,
 ) -> Result<Vec<TickerInformationFromDataCollector>, sqlx::Error> {
-    let result: Vec<(String, String)> = sqlx::query_scalar(
+    let result: Vec<(String, String)> = sqlx::query_as(
         r#"
         SELECT symbol, market FROM available_tickers_byma
         "#,
@@ -467,4 +467,171 @@ pub async fn insert_ticker_sector(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn historical(ticker: &str, ts: i64, close: i64) -> TickerHistoricalData {
+        TickerHistoricalData {
+            ticker: ticker.to_string(),
+            ts,
+            volume: 100,
+            open_amount: Decimal::new(close - 1, 0),
+            high_amount: Decimal::new(close + 1, 0),
+            low_amount: Decimal::new(close - 2, 0),
+            close_amount: Decimal::new(close, 0),
+            close_unadj_amount: Decimal::new(close, 0),
+        }
+    }
+
+    #[sqlx::test]
+    async fn repository_persists_and_reads_every_supported_dataset(pool: PgPool) {
+        let pool = Arc::new(pool);
+        let quotes = vec![
+            TickerQuote {
+                symbol: "COVR".to_string(),
+                market: "leading-equity".to_string(),
+                offered_price: 101.0,
+                bid_price: 99.0,
+                recorded_at: Utc::now(),
+            },
+            TickerQuote {
+                symbol: "GOLD".to_string(),
+                market: "COMMODITY".to_string(),
+                offered_price: 201.0,
+                bid_price: 199.0,
+                recorded_at: Utc::now(),
+            },
+            TickerQuote {
+                symbol: "COVR".to_string(),
+                market: "updated-market".to_string(),
+                offered_price: 102.0,
+                bid_price: 100.0,
+                recorded_at: Utc::now(),
+            },
+        ];
+
+        assert_eq!(persist_quotes(pool.clone(), &quotes).await.unwrap(), 2);
+        ensure_available_ticker(&pool, "ONDM").await.unwrap();
+        ensure_available_ticker(&pool, "ONDM").await.unwrap();
+
+        assert!(
+            is_historical_data_available((*pool).clone(), "COVR")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        update_historical_data(
+            (*pool).clone(),
+            "COVR",
+            vec![historical("COVR", 2, 110), historical("COVR", 1, 100)],
+        )
+        .await
+        .unwrap();
+        let (cached, latest) = is_historical_data_available((*pool).clone(), "COVR")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.len(), 2);
+        assert_eq!(latest, 2);
+        let ordered = fetch_ordered_history(&pool, "COVR").await.unwrap();
+        assert_eq!(
+            ordered.iter().map(|point| point.ts).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        let (inserted, updated) = persist_bid_offers_historical(pool.clone(), &quotes[..2])
+            .await
+            .unwrap();
+        assert_eq!((inserted, updated), (2, 0));
+        let (inserted, _) = persist_bid_offers_historical(pool.clone(), &quotes[..1])
+            .await
+            .unwrap();
+        assert_eq!(inserted, 1);
+
+        let mut descriptions = HashMap::new();
+        descriptions.insert(
+            "COVR".to_string(),
+            ItemDescriptionData {
+                nombre_corto: "Coverage".to_string(),
+                nombre_largo: "Coverage Sociedad Anónima".to_string(),
+                descripcion: Some("Empresa para pruebas".to_string()),
+            },
+        );
+        persist_rava_tickers(pool.clone(), &descriptions)
+            .await
+            .unwrap();
+        let mut changed = descriptions.clone();
+        changed.get_mut("COVR").unwrap().descripcion = Some("Actualizada".to_string());
+        persist_rava_tickers(pool.clone(), &changed).await.unwrap();
+        let info = get_extended_info_for_ticker(pool.clone(), "COVR")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(info.descripcion.as_deref(), Some("Actualizada"));
+        assert!(
+            get_extended_info_for_ticker(pool.clone(), "MISSING")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let mut prices = HashMap::new();
+        prices.insert(
+            "COVR".to_string(),
+            vec![PriceData {
+                precio: 110.0,
+                maximo: 112.0,
+                minimo: 98.0,
+                apertura: 100.0,
+                volumen: 1234.0,
+                fecha: "2026-09-17".to_string(),
+                timestamp: 1_758_067_200,
+            }],
+        );
+        persist_rava_historical_prices(pool.clone(), &prices)
+            .await
+            .unwrap();
+        persist_rava_historical_prices(pool.clone(), &prices)
+            .await
+            .unwrap();
+
+        let byma = get_tickers_openbymadata(pool.clone()).await.unwrap();
+        assert!(byma.iter().any(|item| {
+            item.ticker_symbol == "GOLD" && item.is_commodity && item.yfinance_ticker_name == "GOLD"
+        }));
+        assert!(byma.iter().any(|item| {
+            item.ticker_symbol == "COVR"
+                && !item.is_commodity
+                && item.yfinance_ticker_name == "COVR.BA"
+        }));
+        let rava = get_tickers_rava(pool.clone()).await.unwrap();
+        assert_eq!(rava[0].yfinance_ticker_name, "COVR.BA");
+
+        insert_ticker_sector(pool.clone(), "COVR", "Finanzas")
+            .await
+            .unwrap();
+        insert_ticker_sector(pool.clone(), "COVR", "Tecnología")
+            .await
+            .unwrap();
+        let sector: String =
+            sqlx::query_scalar("SELECT sector FROM ticker_sector WHERE ticker = 'COVR'")
+                .fetch_one(&*pool)
+                .await
+                .unwrap();
+        assert_eq!(sector, "Tecnología");
+
+        remove_ticker_from_available_tickers((*pool).clone(), "COVR")
+            .await
+            .unwrap();
+        assert!(
+            fetch_ordered_history(&pool, "COVR")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

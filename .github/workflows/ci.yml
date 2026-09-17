@@ -10,6 +10,20 @@ jobs:
   validate:
     name: Lint & Format
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_data_collector
+          POSTGRES_PASSWORD: test_data_collector_password
+          POSTGRES_DB: test_db_dc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,3 +41,14 @@ jobs:
 
       - name: Run Clippy linter
         run: cargo clippy -- -D warnings
+
+      - name: Install coverage tooling
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests with 80% line coverage
+        run: >-
+          cargo llvm-cov --all-targets --summary-only
+          --ignore-filename-regex '(main\.rs|commodities_scrapper/|site_scrappers/byma_scrapper/|site_scrappers/common\.rs)'
+          --fail-under-lines 80
+        env:
+          DATABASE_URL: postgres://test_data_collector:test_data_collector_password@localhost:5432/test_db_dc
