@@ -8,6 +8,7 @@ use crate::endpoints::{
     historical_data::HistoricalDataResponse,
     historical_movement::{DailyPrice, MovementResponse},
     interest_rates::InterestRateResponse,
+    ticker_sector::TickerSectorResponse,
 };
 use yfinance_rs::YfClient;
 
@@ -18,6 +19,7 @@ pub mod historical_movement;
 pub mod interest_rates;
 pub mod model_ready_tickers;
 pub mod root;
+pub mod ticker_sector;
 
 #[derive(Clone)]
 pub struct DCState {
@@ -35,6 +37,7 @@ pub struct DCState {
         historical_movement::api_get_historical_movement,
         interest_rates::api_get_us_interest_rate,
         interest_rates::api_get_ar_interest_rate,
+        ticker_sector::api_get_ticker_sector,
     ),
     components(
         schemas(
@@ -44,6 +47,7 @@ pub struct DCState {
             MovementResponse,
             DailyPrice,
             InterestRateResponse,
+            TickerSectorResponse,
         )
     ),
     tags(
@@ -92,6 +96,10 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/interest-rate/ar/{series}",
             post(interest_rates::api_get_ar_interest_rate),
+        )
+        .route(
+            "/ticker/sector/{ticker_name}",
+            get(ticker_sector::api_get_ticker_sector),
         )
         .with_state(dc_state)
         .merge(swagger)
