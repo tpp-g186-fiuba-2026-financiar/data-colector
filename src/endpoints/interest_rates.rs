@@ -88,10 +88,26 @@ pub async fn api_get_ar_interest_rate(
     .await
 }
 
-async fn handle_request<F, Fut>(
+pub(crate) async fn handle_request<F, Fut>(
     pool: sqlx::PgPool,
     source: &str,
     series: &str,
+    fetcher: F,
+) -> axum::Json<serde_json::Value>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<InterestRatePoint>, String>>,
+{
+    handle_request_with_ttl(pool, source, series, CACHE_TTL_DAYS, fetcher).await
+}
+
+/// Same as `handle_request`, with a caller-chosen freshness window: a cached
+/// series is refetched when its latest observation is older than `ttl_days`.
+pub(crate) async fn handle_request_with_ttl<F, Fut>(
+    pool: sqlx::PgPool,
+    source: &str,
+    series: &str,
+    ttl_days: i64,
     fetcher: F,
 ) -> axum::Json<serde_json::Value>
 where
@@ -113,7 +129,7 @@ where
 
     let (data, was_cached) = match cached {
         Some((data, last_updated_ts)) => {
-            let stale_threshold = chrono::Utc::now() - chrono::Duration::days(CACHE_TTL_DAYS);
+            let stale_threshold = chrono::Utc::now() - chrono::Duration::days(ttl_days);
 
             if stale_threshold.timestamp_millis() > last_updated_ts {
                 match fetcher(series.to_string()).await {

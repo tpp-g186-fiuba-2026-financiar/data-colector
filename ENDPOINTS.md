@@ -24,7 +24,8 @@ Una vez corriendo el servicio (por defecto en el puerto definido en `API_PORT`):
 | `POST` | `/available-tickers` | Tickers | [`available_tickers::api_get_available_tickers`](src/endpoints/available_tickers.rs) | Devuelve todos los símbolos cacheados (BYMA + commodities GOLD/OIL) |
 | `POST` | `/historical-data/{ticker}` | Historical Data | [`historical_data::api_get_historical_data`](src/endpoints/historical_data.rs) | OHLCV histórico desde Yahoo Finance (cacheado 5 días) |
 | `POST` | `/interest-rate/us/{series}` | Interest Rates | [`interest_rates::api_get_us_interest_rate`](src/endpoints/interest_rates.rs) | Serie de tasas US desde Yahoo (IRX, FVX, TNX, TYX), cache 5 días |
-| `POST` | `/interest-rate/ar/{series}` | Interest Rates | [`interest_rates::api_get_ar_interest_rate`](src/endpoints/interest_rates.rs) | Serie de tasas AR desde BCRA (TPM, BADLAR, o variable_id num.), cache 5 días |
+| `POST` | `/interest-rate/ar/{series}` | Interest Rates | [`interest_rates::api_get_ar_interest_rate`](src/endpoints/interest_rates.rs) | Serie AR desde BCRA (TPM, BADLAR, RESERVAS, BASE_MONETARIA, TC_MAYORISTA, o variable_id num.), cache 5 días |
+| `POST` | `/macro/argdatos/{series}` | Macro Series | [`macro_series::api_get_argdatos_series`](src/endpoints/macro_series.rs) | Serie diaria de ArgentinaDatos (CCL, MEP, OFICIAL, MAYORISTA, BLUE, RIESGO_PAIS), cache 2 días |
 
 ## Detalle por endpoint
 
@@ -88,6 +89,12 @@ Una vez corriendo el servicio (por defecto en el puerto definido en `API_PORT`):
   }
   ```
 - **500:** Falla de Yahoo Finance o de la base.
+
+### `POST /macro/argdatos/{series}`
+- **Param path** `series`: `CCL`, `MEP`, `OFICIAL`, `MAYORISTA`, `BLUE` (cotización de venta) o `RIESGO_PAIS`.
+- **200:** misma forma que `/interest-rate/*` (`source = "ARGDATOS"`, `data = [{ source, series_id, ts, value }]`, `cached`). Historia desde 2015.
+- **500:** serie no soportada, falla de ArgentinaDatos o de la base.
+- Se cachea en `interest_rate_cached` y se refresca cuando la última observación tiene más de **2 días** (los modelos de `api-ml` predicen todos los días).
 
 ### `POST /interest-rate/ar/{series}`
 - **Param path** `series`: `TPM`, `BADLAR`, o cualquier `variable_id` numérico del BCRA.
