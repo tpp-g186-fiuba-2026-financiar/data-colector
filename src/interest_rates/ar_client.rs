@@ -8,12 +8,9 @@ pub const SOURCE: &str = "AR";
 
 const BCRA_BASE_URL: &str = "https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias";
 
-/// Max observations asked per request (the API default is only 1000, ~4 years of
-/// daily data). 3000 covers ~12 years of daily series.
 const BCRA_LIMIT: u32 = 3000;
 
-/// BCRA API v4.0 nests the observations: `results[].detalle[]` (the v3 shape,
-/// a flat `results[]`, was deprecated and now answers HTTP 410).
+/// API v4.0: observations are nested in `results[].detalle[]`.
 #[derive(Debug, Deserialize)]
 struct BcraResponse {
     results: Vec<BcraVariable>,
@@ -148,7 +145,6 @@ mod tests {
 
     #[test]
     fn deserializes_the_nested_bcra_v4_response() {
-        // Real shape of GET /estadisticas/v4.0/Monetarias/44 (trimmed).
         let raw = r#"{
             "status": 200,
             "metadata": { "resultset": { "count": 2, "offset": 0, "limit": 3000 } },

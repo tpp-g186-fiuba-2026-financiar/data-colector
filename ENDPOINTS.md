@@ -92,9 +92,8 @@ Una vez corriendo el servicio (por defecto en el puerto definido en `API_PORT`):
 
 ### `POST /macro/argdatos/{series}`
 - **Param path** `series`: `CCL`, `MEP`, `OFICIAL`, `MAYORISTA`, `BLUE` (cotización de venta) o `RIESGO_PAIS`.
-- **200:** misma forma que `/interest-rate/*` (`source = "ARGDATOS"`, `data = [{ source, series_id, ts, value }]`, `cached`). Historia desde 2015.
-- **500:** serie no soportada, falla de ArgentinaDatos o de la base.
-- Se cachea en `interest_rate_cached` y se refresca cuando la última observación tiene más de **2 días** (los modelos de `api-ml` predicen todos los días).
+- **200:** misma forma que `/interest-rate/*` (`source = "ARGDATOS"`). Historia desde 2015, cache de 2 días.
+- **500:** serie no soportada o falla de la fuente.
 
 ### `POST /interest-rate/ar/{series}`
 - **Param path** `series`: `TPM`, `BADLAR`, o cualquier `variable_id` numérico del BCRA.

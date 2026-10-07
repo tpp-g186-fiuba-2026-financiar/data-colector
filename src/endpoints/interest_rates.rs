@@ -101,8 +101,7 @@ where
     handle_request_with_ttl(pool, source, series, CACHE_TTL_DAYS, fetcher).await
 }
 
-/// Same as `handle_request`, with a caller-chosen freshness window: a cached
-/// series is refetched when its latest observation is older than `ttl_days`.
+/// Like `handle_request`, refetching when the latest observation is older than `ttl_days`.
 pub(crate) async fn handle_request_with_ttl<F, Fut>(
     pool: sqlx::PgPool,
     source: &str,

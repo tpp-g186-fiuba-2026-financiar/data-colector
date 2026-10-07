@@ -1,6 +1,4 @@
-//! Argentine market series from ArgentinaDatos (https://argentinadatos.com):
-//! free public JSON API, no key. Dollar quotations (official, wholesale, MEP,
-//! CCL, blue) and country risk (riesgo país), all daily.
+//! Daily dollar quotations and country risk from ArgentinaDatos.
 
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
@@ -11,7 +9,6 @@ use crate::persistence::interest_rate_repository::InterestRatePoint;
 pub const SOURCE: &str = "ARGDATOS";
 
 const BASE_URL: &str = "https://api.argentinadatos.com/v1";
-/// The full history goes back to 2011, but only the last decade is useful (and cacheable).
 const START_DATE: &str = "2015-01-01";
 
 #[derive(Debug, PartialEq)]
@@ -54,7 +51,6 @@ pub async fn fetch_series(series: &str) -> Result<Vec<InterestRatePoint>, String
     fetch_series_from(BASE_URL, series).await
 }
 
-/// Split out from `fetch_series` so tests can point it at a mock server.
 pub async fn fetch_series_from(
     base_url: &str,
     series: &str,

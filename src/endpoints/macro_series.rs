@@ -4,8 +4,6 @@ use crate::endpoints::DCState;
 use crate::endpoints::interest_rates::handle_request_with_ttl;
 use crate::interest_rates::argentinadatos_client;
 
-/// Daily Argentine series feed a model that predicts every day: a 5-day window (as
-/// for interest rates) would leave it a full week behind.
 const MACRO_CACHE_TTL_DAYS: i64 = 2;
 
 #[utoipa::path(
@@ -72,7 +70,6 @@ mod tests {
         let day_ms = 86_400_000_i64;
         let now = chrono::Utc::now().timestamp_millis();
 
-        // Latest observation 1 day old: still fresh for a 2-day window.
         interest_rate_repository::update_cache(
             pool.clone(),
             "ARGDATOS",
@@ -87,7 +84,6 @@ mod tests {
         .await;
         assert_eq!(fresh.0["cached"], true);
 
-        // Latest observation 3 days old: refetched.
         interest_rate_repository::update_cache(
             pool.clone(),
             "ARGDATOS",
