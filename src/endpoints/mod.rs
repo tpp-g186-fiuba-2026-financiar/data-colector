@@ -17,6 +17,7 @@ pub mod health;
 pub mod historical_data;
 pub mod historical_movement;
 pub mod interest_rates;
+pub mod macro_series;
 pub mod model_ready_tickers;
 pub mod root;
 pub mod ticker_sector;
@@ -37,6 +38,7 @@ pub struct DCState {
         historical_movement::api_get_historical_movement,
         interest_rates::api_get_us_interest_rate,
         interest_rates::api_get_ar_interest_rate,
+        macro_series::api_get_argdatos_series,
         ticker_sector::api_get_ticker_sector,
     ),
     components(
@@ -54,7 +56,8 @@ pub struct DCState {
         (name = "General", description = "Root and health check endpoints"),
         (name = "Tickers", description = "Listing of tickers (BYMA + commodities) cached by the collector"),
         (name = "Historical Data", description = "Historical OHLCV candles fetched from Yahoo Finance and cached in Postgres. Use GOLD or OIL como ticker para commodities."),
-        (name = "Interest Rates", description = "Series de tasas de interés US (Yahoo) y AR (BCRA), cacheadas en Postgres")
+        (name = "Interest Rates", description = "Series de tasas de interés US (Yahoo) y AR (BCRA), cacheadas en Postgres"),
+        (name = "Macro Series", description = "Series macro diarias de Argentina (ArgentinaDatos: dólar CCL/MEP/oficial/mayorista/blue y riesgo país), cacheadas en Postgres")
     ),
     info(
         title = "Data Collector API",
@@ -96,6 +99,10 @@ pub fn data_collector_router(dc_state: DCState) -> axum::Router {
         .route(
             "/interest-rate/ar/{series}",
             post(interest_rates::api_get_ar_interest_rate),
+        )
+        .route(
+            "/macro/argdatos/{series}",
+            post(macro_series::api_get_argdatos_series),
         )
         .route(
             "/ticker/sector/{ticker_name}",
