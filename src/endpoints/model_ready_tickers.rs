@@ -11,7 +11,7 @@ pub async fn api_get_model_ready_tickers(
     let result = sqlx::query_scalar::<_, String>(
         r#"
         SELECT ticker
-        FROM ticker_history_data_cached_yf
+        FROM rava_ticker_history
         GROUP BY ticker
         HAVING COUNT(*) >= $1
         ORDER BY ticker
