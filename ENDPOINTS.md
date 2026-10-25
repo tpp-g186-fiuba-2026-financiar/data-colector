@@ -108,5 +108,11 @@ Estos no se exponen vía API pero corren en `tokio::spawn` al arrancar el binari
   tickers desde BYMA cada 60 min.
 - `BymaTickerHistoricalDataPersistor::persist_historical_price_tickers` —
   refresca histórico de tickers BYMA en lotes de 8 cada 2–4 min.
+  Antes de guardar aplica `history_corrections::apply_corrections` (también lo
+  hace `/historical-data` cuando baja de Yahoo): A3, CARC, DOME, ECOG, GAMI y RICH
+  se reconstruyen con BYMA + Rava, a SEMI se le quitan picos aislados y CEPU, VALO
+  y DOME se recortan al inicio. Para forzar el recálculo de un ticker sin esperar
+  los 5 días: `UPDATE available_tickers_byma SET last_history_price_cached_at = NULL
+  WHERE symbol = '...'`.
 - `CommoditiesHistoricalPersistor::persist_commodities_historical` — refresca
   histórico de `GOLD` (`GC=F`) y `OIL` (`CL=F`) cada 6 h.

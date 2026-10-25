@@ -7,6 +7,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use yfinance_rs::{Range, Ticker, YfClient};
 
+use crate::history_corrections;
 use crate::persistence::ticker_repository::{self, TickerHistoricalData};
 
 const MIN_MODEL_HISTORY_ROWS: usize = 100;
@@ -219,7 +220,7 @@ async fn fetch_yf_history_helper(
         .map(|entry| TickerHistoricalData::from_candle(&entry, ticker))
         .collect();
 
-    Ok(historical_data)
+    history_corrections::apply_corrections(ticker, historical_data).await
 }
 
 #[cfg(test)]

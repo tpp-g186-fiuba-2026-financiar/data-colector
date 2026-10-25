@@ -5,6 +5,7 @@ use regex::Regex;
 use sqlx::Row;
 
 use crate::endpoints::DCState;
+use crate::history_corrections;
 use crate::persistence::ticker_repository::{self, TickerHistoricalData};
 
 pub struct BymaTickerHistoricalDataPersistor;
@@ -92,6 +93,24 @@ impl BymaTickerHistoricalDataPersistor {
                             .iter()
                             .map(|candle| TickerHistoricalData::from_candle(candle, &clean_symbol))
                             .collect();
+
+                        // Si la correccion falla no se persiste: queda el historico anterior
+                        // y el ticker se reintenta en la proxima vuelta.
+                        let historical_data_rows = match history_corrections::apply_corrections(
+                            &clean_symbol,
+                            historical_data_rows,
+                        )
+                        .await
+                        {
+                            Ok(rows) => rows,
+                            Err(e) => {
+                                eprintln!(
+                                    "[Data-Collector-Historical-Task] Failed to correct historical data for {}: {}",
+                                    clean_symbol, e
+                                );
+                                continue;
+                            }
+                        };
 
                         if historical_data_rows.is_empty() {
                             continue;
