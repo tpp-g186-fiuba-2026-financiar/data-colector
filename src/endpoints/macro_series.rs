@@ -92,11 +92,51 @@ mod tests {
         )
         .await
         .unwrap();
+        sqlx::query(
+            "UPDATE interest_rate_fetches SET fetched_at = now() - interval '3 days' \
+             WHERE source = 'ARGDATOS' AND series_id = 'MEP'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let stale = handle_request_with_ttl(pool.clone(), "ARGDATOS", "MEP", 2, |_| async {
             Ok(vec![point("ARGDATOS", "MEP", now)])
         })
         .await;
         assert_eq!(stale.0["cached"], false);
+    }
+
+    #[sqlx::test]
+    async fn sin_datos_nuevos_no_reescribe_y_queda_fresca(pool: PgPool) {
+        let now = chrono::Utc::now().timestamp_millis();
+        interest_rate_repository::update_cache(
+            pool.clone(),
+            "ARGDATOS",
+            "CCL",
+            vec![point("ARGDATOS", "CCL", now - 3 * 86_400_000)],
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE interest_rate_fetches SET fetched_at = now() - interval '3 days' \
+             WHERE source = 'ARGDATOS' AND series_id = 'CCL'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // La fuente todavia no publico nada nuevo (fin de semana): se sirve lo
+        // guardado y se anota la consulta, sin reescribir la serie.
+        let first = handle_request_with_ttl(pool.clone(), "ARGDATOS", "CCL", 2, |_| async move {
+            Ok(vec![point("ARGDATOS", "CCL", now - 3 * 86_400_000)])
+        })
+        .await;
+        assert_eq!(first.0["cached"], true);
+        // Ya consultada hoy: el siguiente pedido no vuelve a ir a la fuente.
+        let second = handle_request_with_ttl(pool.clone(), "ARGDATOS", "CCL", 2, |_| async {
+            panic!("recien consultada: no hay que volver a ir a la fuente")
+        })
+        .await;
+        assert_eq!(second.0["cached"], true);
     }
 
     #[sqlx::test]
