@@ -234,7 +234,7 @@ mod test {
     fn is_byma_opendata_available() -> bool {
         let now = chrono::Utc::now() - chrono::Duration::hours(3);
         let hour = now.hour();
-        hour >= 10 && hour <= 18
+        (10..=18).contains(&hour)
     }
     #[test]
     fn test_get_all_available_tickers() {

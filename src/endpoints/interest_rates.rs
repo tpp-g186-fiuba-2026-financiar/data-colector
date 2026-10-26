@@ -131,7 +131,20 @@ where
             let stale_threshold = chrono::Utc::now() - chrono::Duration::days(ttl_days);
 
             if stale_threshold.timestamp_millis() > last_updated_ts {
+                let latest_cached = data.iter().map(|p| p.ts).max().unwrap_or(0);
                 match fetcher(series.to_string()).await {
+                    // Sin datos nuevos no se reescribe la serie: solo se anota la consulta.
+                    Ok(fresh)
+                        if fresh.iter().map(|p| p.ts).max().unwrap_or(0) <= latest_cached
+                            && fresh.len() <= data.len() =>
+                    {
+                        if let Err(e) =
+                            interest_rate_repository::mark_fetched(pool, source, series).await
+                        {
+                            eprintln!("Failed to mark interest rate fetch: {}", e);
+                        }
+                        (data, true)
+                    }
                     Ok(fresh) => match interest_rate_repository::update_cache(
                         pool,
                         source,
@@ -221,6 +234,19 @@ mod tests {
         }
     }
 
+    /// Simula que la ultima consulta de la serie fue hace un mes.
+    async fn vencer(pool: &PgPool, source: &str, series: &str) {
+        sqlx::query(
+            "UPDATE interest_rate_fetches SET fetched_at = now() - interval '30 days' \
+             WHERE source = $1 AND series_id = $2",
+        )
+        .bind(source)
+        .bind(series)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[sqlx::test]
     async fn interest_rate_cache_covers_fresh_stale_missing_and_error_paths(pool: PgPool) {
         let now = chrono::Utc::now().timestamp_millis();
@@ -247,6 +273,7 @@ mod tests {
         )
         .await
         .unwrap();
+        vencer(&pool, "US", "IRX").await;
         let response = handle_request(pool.clone(), "US", "IRX", |_| async {
             Ok(vec![point("US", "IRX", 10, 2)])
         })
@@ -256,7 +283,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(cached.1, 10);
+        assert_eq!(cached.0.iter().map(|p| p.ts).max(), Some(10));
 
         interest_rate_repository::update_cache(
             pool.clone(),
@@ -330,6 +357,7 @@ mod tests {
         )
         .await
         .unwrap();
+        vencer(&pool, "US", "STALE").await;
 
         let response = handle_request(pool.clone(), "US", "STALE", |_| async {
             Ok(vec![point_with_oversized_series_id("US")])

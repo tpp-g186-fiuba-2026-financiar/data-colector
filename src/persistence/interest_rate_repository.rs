@@ -28,13 +28,40 @@ pub async fn is_cached(
     .fetch_all(&pool)
     .await?;
 
-    match result.is_empty() {
-        true => Ok(None),
-        false => {
-            let latest_ts = result.iter().map(|p| p.ts).max().unwrap_or(0);
-            Ok(Some((result, latest_ts)))
-        }
+    if result.is_empty() {
+        return Ok(None);
     }
+    // Frescura = cuando se bajo por ultima vez; si nunca se registro (datos
+    // anteriores a esa tabla), la fecha del ultimo dato.
+    let fetched_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        r#"
+        SELECT fetched_at FROM interest_rate_fetches
+        WHERE source = $1 AND series_id = $2
+        "#,
+    )
+    .bind(source)
+    .bind(series_id)
+    .fetch_optional(&pool)
+    .await?;
+    let latest_ts = result.iter().map(|p| p.ts).max().unwrap_or(0);
+    let checked = fetched_at.map_or(latest_ts, |at| at.timestamp_millis());
+    Ok(Some((result, checked)))
+}
+
+/// Registra que la serie se acaba de consultar, aunque no haya traido nada nuevo.
+pub async fn mark_fetched(pool: PgPool, source: &str, series_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO interest_rate_fetches (source, series_id, fetched_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (source, series_id) DO UPDATE SET fetched_at = EXCLUDED.fetched_at
+        "#,
+    )
+    .bind(source)
+    .bind(series_id)
+    .execute(&pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn update_cache(
@@ -56,20 +83,38 @@ pub async fn update_cache(
     .execute(&mut *tx)
     .await?;
 
-    for point in new_data {
-        sqlx::query(
-            r#"
-            INSERT INTO interest_rate_cached (source, series_id, ts, value)
-            VALUES ($1, $2, $3, $4)
-            "#,
-        )
-        .bind(&point.source)
-        .bind(&point.series_id)
-        .bind(point.ts)
-        .bind(point.value)
-        .execute(&mut *tx)
-        .await?;
-    }
+    // Una sola insercion para toda la serie (miles de filas): fila por fila,
+    // contra una base remota, tardaba mas que el timeout de quien pedia y la
+    // transaccion se cancelaba sin guardar nada.
+    let sources: Vec<String> = new_data.iter().map(|p| p.source.clone()).collect();
+    let series: Vec<String> = new_data.iter().map(|p| p.series_id.clone()).collect();
+    let ts: Vec<i64> = new_data.iter().map(|p| p.ts).collect();
+    let values: Vec<rust_decimal::Decimal> = new_data.iter().map(|p| p.value).collect();
+    sqlx::query(
+        r#"
+        INSERT INTO interest_rate_cached (source, series_id, ts, value)
+        SELECT * FROM UNNEST($1::varchar[], $2::varchar[], $3::int8[], $4::numeric[])
+        ON CONFLICT (source, series_id, ts) DO UPDATE SET value = EXCLUDED.value
+        "#,
+    )
+    .bind(&sources)
+    .bind(&series)
+    .bind(&ts)
+    .bind(&values)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO interest_rate_fetches (source, series_id, fetched_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (source, series_id) DO UPDATE SET fetched_at = EXCLUDED.fetched_at
+        "#,
+    )
+    .bind(source)
+    .bind(series_id)
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(())
